@@ -30,6 +30,16 @@ ui_*.h
 Makefile*
 *build-*
 build/
+build/models/
+.qtcreator/
+Thumbs.db
+Desktop.ini
+external/WhereLogicOpenCV/prebuilt/*
+!external/WhereLogicOpenCV/prebuilt/README.md
+external/WhereLogicOpenCV/.build/
+third_party/opencv/prebuilt/
+third_party/opencv-src/
+third_party/whisper.cpp/
 *.qm
 *.prl
 *.qmlls.ini

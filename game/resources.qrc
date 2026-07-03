@@ -1,0 +1,34 @@
+<RCC>
+    <qresource prefix="/">
+        <file>qml/main.qml</file>
+        <file>qml/MainContainer.qml</file>
+        <file>qml/Theme.qml</file>
+        <file>qml/qmldir</file>
+        <file>qml/views/WelcomeScreen.qml</file>
+        <file>qml/views/TeamSetupScreen.qml</file>
+        <file>qml/views/AdminMainScreen.qml</file>
+        <file>qml/views/AdminEditorScreen.qml</file>
+        <file>qml/views/UniversalGameField.qml</file>
+        <file>qml/views/InterRoundScreen.qml</file>
+        <file>qml/views/FinalVictoryScreen.qml</file>
+        <file>qml/components/FullscreenToggle.qml</file>
+        <file>qml/components/GameSlider.qml</file>
+        <file>qml/components/GameButton.qml</file>
+        <file>qml/components/GameTextField.qml</file>
+        <file>qml/components/NeonPanel.qml</file>
+        <file>qml/components/StarRow.qml</file>
+        <file>qml/components/GameCard.qml</file>
+        <file>qml/components/SmartTimer.qml</file>
+        <file>qml/components/ScoreHUD.qml</file>
+        <file>qml/components/MissingRevealOverlay.qml</file>
+        <file>qml/components/layouts/StandardGridLayout.qml</file>
+        <file>qml/components/layouts/EquationLayout.qml</file>
+        <file>qml/components/layouts/FullMaskLayout.qml</file>
+        <file>qml/components/layouts/ChronologyLayout.qml</file>
+        <file>qml/components/layouts/TextOnlyLayout.qml</file>
+        <file>qml/components/layouts/BlitzGridLayout.qml</file>
+        <file>qml/components/layouts/SingleHybridLayout.qml</file>
+        <file alias="config/ai_manifest.json">../config/ai_manifest.json</file>
+        <file alias="config/ui_defaults_ru.json">../config/ui_defaults_ru.json</file>
+    </qresource>
+</RCC>

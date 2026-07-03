@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/">
+        <file>qml/main.qml</file>
+        <file>qml/FullscreenToggle.qml</file>
+        <file>qml/PairingScreen.qml</file>
+        <file>qml/DashboardScreen.qml</file>
+        <file>qml/AnswerTextPanel.qml</file>
+        <file>qml/ControlPanel.qml</file>
+        <file>qml/PresenterTheme.qml</file>
+        <file>qml/qmldir</file>
+    </qresource>
+</RCC>

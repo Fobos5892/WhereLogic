@@ -1,0 +1,33 @@
+{
+    "version": 2,
+    "external_repo": "external/WhereLogicOpenCV",
+    "layout": {
+        "include": "include/opencv2/opencv.hpp",
+        "win32_mingw": {
+            "lib": "x64/mingw/lib",
+            "bin": "x64/mingw/bin",
+            "link_glob": "libopencv_{core,imgproc,imgcodecs}*.dll.a"
+        },
+        "win32_msvc": {
+            "lib": "x64/msvc/lib",
+            "bin": "x64/msvc/bin",
+            "link_glob": "opencv_world*.lib"
+        }
+    },
+    "platforms": {
+        "win32-mingw": {
+            "prebuilt_path": "external/WhereLogicOpenCV/prebuilt",
+            "lib_subdir": "x64/mingw/lib",
+            "bin_subdir": "x64/mingw/bin",
+            "build_script": "external/WhereLogicOpenCV/scripts/build_qt_mingw.ps1",
+            "note": "Собирается тем же MinGW, что и Qt (mingw1310_64). MSYS2 OpenCV не использовать."
+        },
+        "win32-msvc": {
+            "opencv_version": "4.10.0",
+            "prebuilt_path": "external/WhereLogicOpenCV/prebuilt",
+            "lib_subdir": "x64/msvc/lib",
+            "bin_subdir": "x64/msvc/bin",
+            "fetch_component": "opencv_win_msvc"
+        }
+    }
+}

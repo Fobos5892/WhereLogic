@@ -1,0 +1,24 @@
+{
+    "name": "WhereLogicOpenCV",
+    "version": 1,
+    "opencv_version": "4.13.0",
+    "modules": ["core", "imgproc", "imgcodecs"],
+    "toolchain": {
+        "win32_mingw": {
+            "compiler": "Qt mingw1310_64 (GCC 13.1.0)",
+            "lib": "prebuilt/x64/mingw/lib",
+            "bin": "prebuilt/x64/mingw/bin",
+            "link_glob": "libopencv_{core,imgproc,imgcodecs}*.dll.a"
+        },
+        "win32_msvc": {
+            "lib": "prebuilt/x64/msvc/lib",
+            "bin": "prebuilt/x64/msvc/bin",
+            "link_glob": "opencv_world*.lib",
+            "fetch": "WhereLogic scripts/fetch_ai_deps.py --id opencv_win_msvc"
+        }
+    },
+    "where_logic": {
+        "include_pri": "third_party/opencv.pri",
+        "default_root": "external/WhereLogicOpenCV/prebuilt"
+    }
+}

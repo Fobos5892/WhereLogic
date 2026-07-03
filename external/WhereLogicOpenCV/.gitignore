@@ -1,0 +1,7 @@
+# Build tree and artifacts — not committed
+.build/
+prebuilt/*
+!prebuilt/README.md
+
+# Download cache
+*.zip

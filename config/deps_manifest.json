@@ -1,0 +1,58 @@
+{
+    "version": 1,
+    "components": [
+        {
+            "id": "whisper_cpp",
+            "label": "whisper.cpp (исходники)",
+            "kind": "git",
+            "url": "https://github.com/ggerganov/whisper.cpp.git",
+            "destination": "third_party/whisper.cpp",
+            "verify_path": "third_party/whisper.cpp/whisper.h",
+            "size_hint_mb": 15,
+            "groups": ["whisper", "ai"]
+        },
+        {
+            "id": "whisper_model_tiny",
+            "label": "Модель Whisper ggml-tiny.bin",
+            "kind": "http",
+            "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+            "destination": "build/models/ggml-tiny.bin",
+            "verify_path": "build/models/ggml-tiny.bin",
+            "size_bytes": 77691713,
+            "groups": ["whisper", "ai"]
+        },
+        {
+            "id": "opencv_win_msvc",
+            "label": "OpenCV 4.10 (Windows, MSVC)",
+            "kind": "opencv_windows",
+            "url": "https://github.com/opencv/opencv/releases/download/4.10.0/opencv-4.10.0-windows.exe",
+            "version": "4.10.0",
+            "destination": "external/WhereLogicOpenCV/prebuilt",
+            "verify_path": "external/WhereLogicOpenCV/prebuilt/include/opencv2/opencv.hpp",
+            "size_bytes": 185000000,
+            "platforms": ["win32"],
+            "toolchain": "msvc",
+            "groups": ["opencv", "ai"]
+        },
+        {
+            "id": "opencv_win_mingw",
+            "label": "OpenCV (Windows, MinGW — Qt toolchain)",
+            "kind": "manual",
+            "destination": "external/WhereLogicOpenCV/prebuilt",
+            "verify_path": "external/WhereLogicOpenCV/prebuilt/x64/mingw/lib",
+            "platforms": ["win32"],
+            "toolchain": "mingw",
+            "groups": ["opencv", "ai"],
+            "manual_hint": "Клонировать external/WhereLogicOpenCV, затем: powershell -ExecutionPolicy Bypass -File external/WhereLogicOpenCV/scripts/build_qt_mingw.ps1. MSYS2 OpenCV не использовать (ABI несовместим с Qt)."
+        },
+        {
+            "id": "qt_httpserver",
+            "label": "Qt HttpServer (модуль Qt)",
+            "kind": "manual",
+            "destination": "",
+            "verify_path": "",
+            "groups": ["network"],
+            "manual_hint": "Qt Maintenance Tool → Qt 6.x → ваш kit → Qt HttpServer → Apply. Затем Run qmake и Rebuild."
+        }
+    ]
+}
