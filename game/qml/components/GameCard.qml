@@ -66,9 +66,9 @@ Flipable {
                 id: cardImage
                 anchors.fill: parent
                 anchors.margins: 8
-                visible: status === Image.Ready
-                source: (gameViewModel.currentPuzzleId > 0 && flip.cardIndex === 0)
-                        ? gameViewModel.puzzleDisplayImageUrl(0)
+                visible: status === Image.Ready && source.length > 0
+                source: gameViewModel.currentPuzzleId > 0
+                        ? gameViewModel.puzzleDisplayImageUrl(flip.cardIndex)
                         : ""
                 fillMode: Image.PreserveAspectFit
                 cache: false

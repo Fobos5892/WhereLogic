@@ -6,10 +6,12 @@
 
 #include <QBuffer>
 #include <QFile>
+#include <QFutureWatcher>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRegularExpression>
 #include <QVariantMap>
+#include <QtConcurrent>
 
 AdminViewModel::AdminViewModel(DatabaseManager *database, QObject *parent)
     : QObject(parent)
@@ -53,7 +55,192 @@ QString AdminViewModel::puzzleImageUrl() const
     if (m_selectedPuzzleId <= 0) {
         return {};
     }
-    return QStringLiteral("image://puzzle/%1/0?rev=%2").arg(m_selectedPuzzleId).arg(m_puzzleImageRevision);
+    return QStringLiteral("image://puzzle/%1/%2?rev=%3")
+        .arg(m_selectedPuzzleId)
+        .arg(m_selectedImageSlot)
+        .arg(m_puzzleImageRevision);
+}
+
+int AdminViewModel::imageSlotCount() const
+{
+    if (m_selectedRoundLayoutType == QStringLiteral("FULL_MASK")) {
+        return 1;
+    }
+    if (m_selectedRoundLayoutType == QStringLiteral("TEXT_ONLY")) {
+        return 0;
+    }
+    if (m_selectedRoundLayoutType == QStringLiteral("SINGLE_HYBRID")) {
+        return 2;
+    }
+    return 4;
+}
+
+bool AdminViewModel::showGamePreview() const
+{
+    return isPhotoMaskRound() && m_selectedImageSlot == 0 && hasMaskContour() && hasPreviewImage();
+}
+
+void AdminViewModel::setSelectedImageSlot(int slot)
+{
+    if (slot < 0 || slot >= imageSlotCount()) {
+        return;
+    }
+    if (m_selectedImageSlot == slot) {
+        return;
+    }
+
+    cacheCurrentSlotState();
+    m_selectedImageSlot = slot;
+    emit selectedImageSlotChanged();
+    loadImageSlot(slot);
+}
+
+void AdminViewModel::cacheCurrentSlotState()
+{
+    if (m_selectedPuzzleId <= 0) {
+        return;
+    }
+
+    if (!m_sourceImage.isNull()) {
+        m_slotImageCache.insert(m_selectedImageSlot, m_sourceImage);
+    }
+    if (!m_pendingImageBytes.isEmpty()) {
+        m_slotPendingBytes.insert(m_selectedImageSlot, m_pendingImageBytes);
+    }
+}
+
+void AdminViewModel::loadImageSlot(int slotIndex)
+{
+    m_sourceImage = QImage();
+    m_previewImage = QImage();
+    m_pendingImageBytes.clear();
+    m_maskContour.clear();
+
+    if (m_slotImageCache.contains(slotIndex)) {
+        m_sourceImage = m_slotImageCache.value(slotIndex);
+    } else if (m_database && m_selectedPuzzleId > 0) {
+        const QByteArray imageData = m_database->puzzleImageData(m_selectedPuzzleId, slotIndex);
+        if (!imageData.isEmpty()) {
+            m_sourceImage.loadFromData(imageData);
+        }
+    }
+
+    if (m_slotPendingBytes.contains(slotIndex)) {
+        m_pendingImageBytes = m_slotPendingBytes.value(slotIndex);
+        if (m_sourceImage.isNull()) {
+            m_sourceImage.loadFromData(m_pendingImageBytes);
+        }
+    }
+
+    if (slotIndex == 0 && m_selectedTemplateId > 0 && m_database) {
+        m_maskContour = m_database->maskTemplateContour(m_selectedTemplateId);
+    }
+
+    if (m_sourceImage.isNull() && slotIndex == 0 && m_selectedTemplateId > 0 && m_database) {
+        const QByteArray templateData = m_database->maskTemplateImageData(m_selectedTemplateId);
+        if (!templateData.isEmpty()) {
+            m_sourceImage.loadFromData(templateData);
+        }
+    }
+
+    emit maskContourChanged();
+    refreshEditorPreview();
+    ++m_puzzleImageRevision;
+    emit puzzleImageChanged();
+}
+
+void AdminViewModel::refreshEditorPreview()
+{
+    if (m_sourceImage.isNull()) {
+        m_previewImage = QImage();
+        updatePreviewProvider();
+        return;
+    }
+
+    const bool hide = isPhotoMaskRound() && m_selectedImageSlot == 0 && !m_maskContour.isEmpty()
+                      && m_imageProcessor;
+    if (!hide) {
+        m_previewImage = m_sourceImage;
+        updatePreviewProvider();
+        return;
+    }
+
+    const int jobId = ++m_previewJobId;
+    const QImage source = m_sourceImage;
+    const QString contour = m_maskContour;
+    ImageProcessor *processor = m_imageProcessor;
+    setImageProcessingBusy(true);
+
+    auto *watcher = new QFutureWatcher<QImage>(this);
+    connect(watcher, &QFutureWatcher<QImage>::finished, this, [this, watcher, jobId]() {
+        if (jobId == m_previewJobId) {
+            const QImage result = watcher->result();
+            m_previewImage = result.isNull() ? m_sourceImage : result;
+            updatePreviewProvider();
+        }
+        setImageProcessingBusy(false);
+        watcher->deleteLater();
+    });
+    watcher->setFuture(QtConcurrent::run([processor, source, contour]() -> QImage {
+        if (!processor) {
+            return source;
+        }
+        const QImage hidden = processor->applyHideMask(source, contour);
+        return hidden.isNull() ? source : hidden;
+    }));
+}
+
+void AdminViewModel::setImageProcessingBusy(bool busy)
+{
+    if (busy) {
+        ++m_processingJobs;
+    } else if (m_processingJobs > 0) {
+        --m_processingJobs;
+    }
+
+    const bool processing = m_processingJobs > 0;
+    if (m_imageProcessing == processing) {
+        return;
+    }
+    m_imageProcessing = processing;
+    emit imageProcessingChanged();
+}
+
+bool AdminViewModel::slotHasImage(int slotIndex) const
+{
+    if (m_slotImageCache.contains(slotIndex) && !m_slotImageCache.value(slotIndex).isNull()) {
+        return true;
+    }
+    if (m_slotPendingBytes.contains(slotIndex)) {
+        return true;
+    }
+    if (slotIndex == m_selectedImageSlot && !m_sourceImage.isNull()) {
+        return true;
+    }
+    if (m_database && m_selectedPuzzleId > 0) {
+        return !m_database->puzzleImageData(m_selectedPuzzleId, slotIndex).isEmpty();
+    }
+    return false;
+}
+
+QString AdminViewModel::slotThumbnailUrl(int slotIndex) const
+{
+    if (!slotHasImage(slotIndex)) {
+        return {};
+    }
+    if (m_selectedPuzzleId > 0 && slotIndex != m_selectedImageSlot) {
+        return QStringLiteral("image://puzzle/%1/%2?rev=%3")
+            .arg(m_selectedPuzzleId)
+            .arg(slotIndex)
+            .arg(m_puzzleImageRevision);
+    }
+    if (!m_previewImage.isNull() && slotIndex == m_selectedImageSlot) {
+        return previewImageUrl();
+    }
+    return QStringLiteral("image://puzzle/%1/%2?rev=%3")
+        .arg(m_selectedPuzzleId)
+        .arg(slotIndex)
+        .arg(m_puzzleImageRevision);
 }
 
 void AdminViewModel::setSelectedPresetId(int presetId)
@@ -81,6 +268,7 @@ void AdminViewModel::setSelectedRoundId(int roundId)
         m_selectedRoundLayoutType = round.layoutType;
     }
     emit selectedRoundIdChanged(roundId);
+    emit imageSlotsChanged();
     clearPuzzleEditor();
     refreshPuzzles();
 }
@@ -250,11 +438,11 @@ void AdminViewModel::savePresetRounds()
 
 void AdminViewModel::selectPuzzle(int puzzleId)
 {
-    if (m_selectedPuzzleId == puzzleId) {
-        return;
-    }
+    cacheCurrentSlotState();
     m_selectedPuzzleId = puzzleId;
+    m_selectedImageSlot = 0;
     emit selectedPuzzleIdChanged();
+    emit selectedImageSlotChanged();
     loadPuzzleEditor(puzzleId);
 }
 
@@ -317,6 +505,8 @@ void AdminViewModel::savePuzzle()
         return;
     }
 
+    cacheCurrentSlotState();
+
     if (m_editAnswer.trimmed().isEmpty()) {
         setStatusMessage(QStringLiteral("Введите правильный ответ"));
         return;
@@ -327,8 +517,8 @@ void AdminViewModel::savePuzzle()
         return;
     }
 
-    if (isPhotoMaskRound() && m_sourceImage.isNull()) {
-        setStatusMessage(QStringLiteral("Загрузите фото"));
+    if (isPhotoMaskRound() && !slotHasImage(0)) {
+        setStatusMessage(QStringLiteral("Загрузите фото в первую ячейку"));
         return;
     }
 
@@ -345,33 +535,71 @@ void AdminViewModel::savePuzzle()
         QBuffer buffer(&imageBytes);
         buffer.open(QIODevice::WriteOnly);
         m_sourceImage.save(&buffer, "PNG");
-        m_database->upsertPuzzleImage(m_selectedPuzzleId, 0, imageBytes);
+        m_database->upsertPuzzleImage(m_selectedPuzzleId, m_selectedImageSlot, imageBytes);
+        m_slotImageCache.insert(m_selectedImageSlot, m_sourceImage);
     }
 
     if (!m_pendingImageBytes.isEmpty()) {
-        m_database->upsertPuzzleImage(m_selectedPuzzleId, 0, m_pendingImageBytes);
+        m_database->upsertPuzzleImage(m_selectedPuzzleId, m_selectedImageSlot, m_pendingImageBytes);
+        m_slotPendingBytes.remove(m_selectedImageSlot);
         m_pendingImageBytes.clear();
     }
 
-    if (!m_maskContour.isEmpty() && !m_sourceImage.isNull()) {
+    for (auto it = m_slotImageCache.constBegin(); it != m_slotImageCache.constEnd(); ++it) {
+        if (it.key() == m_selectedImageSlot || it.value().isNull()) {
+            continue;
+        }
         QByteArray imageBytes;
         QBuffer buffer(&imageBytes);
         buffer.open(QIODevice::WriteOnly);
-        m_sourceImage.save(&buffer, "PNG");
+        it.value().save(&buffer, "PNG");
+        m_database->upsertPuzzleImage(m_selectedPuzzleId, it.key(), imageBytes);
+    }
 
-        const int templateId = m_database->upsertMaskTemplate(m_selectedTemplateId,
-                                                              QStringLiteral("mask_%1").arg(m_selectedPuzzleId),
-                                                              imageBytes,
-                                                              m_maskContour);
-        if (templateId > 0) {
-            m_selectedTemplateId = templateId;
-            m_database->setPuzzleTemplateId(m_selectedPuzzleId, templateId);
+    for (auto it = m_slotPendingBytes.constBegin(); it != m_slotPendingBytes.constEnd(); ++it) {
+        if (it.key() == m_selectedImageSlot) {
+            continue;
+        }
+        m_database->upsertPuzzleImage(m_selectedPuzzleId, it.key(), it.value());
+    }
+    m_slotPendingBytes.clear();
+
+    if (!m_maskContour.isEmpty()) {
+        QImage maskSource = m_slotImageCache.value(0);
+        if (maskSource.isNull() && m_selectedImageSlot == 0) {
+            maskSource = m_sourceImage;
+        }
+        if (maskSource.isNull() && m_database) {
+            const QByteArray slot0Data = m_database->puzzleImageData(m_selectedPuzzleId, 0);
+            if (!slot0Data.isEmpty()) {
+                maskSource.loadFromData(slot0Data);
+            }
+        }
+
+        if (!maskSource.isNull()) {
+            QByteArray imageBytes;
+            QBuffer buffer(&imageBytes);
+            buffer.open(QIODevice::WriteOnly);
+            maskSource.save(&buffer, "PNG");
+
+            const int templateId = m_database->upsertMaskTemplate(m_selectedTemplateId,
+                                                                  QStringLiteral("mask_%1").arg(m_selectedPuzzleId),
+                                                                  imageBytes,
+                                                                  m_maskContour);
+            if (templateId > 0) {
+                m_selectedTemplateId = templateId;
+                m_database->setPuzzleTemplateId(m_selectedPuzzleId, templateId);
+            }
         }
     }
 
     ++m_puzzleImageRevision;
     emit puzzleImageChanged();
+    if (m_imageProvider && m_selectedPuzzleId > 0) {
+        m_imageProvider->invalidatePuzzle(m_selectedPuzzleId);
+    }
     refreshPuzzles();
+    loadPuzzleEditor(m_selectedPuzzleId);
     setStatusMessage(QStringLiteral("Загадка сохранена"));
 }
 
@@ -406,24 +634,45 @@ bool AdminViewModel::importPuzzleImage(const QUrl &fileUrl)
         setStatusMessage(QStringLiteral("Формат изображения не поддерживается"));
         return false;
     }
-    m_previewImage = m_sourceImage;
-    m_maskContour.clear();
-    emit maskContourChanged();
+    m_slotPendingBytes.insert(m_selectedImageSlot, m_pendingImageBytes);
+    m_slotImageCache.insert(m_selectedImageSlot, m_sourceImage);
+
+    if (m_selectedImageSlot == 0) {
+        m_maskContour.clear();
+        emit maskContourChanged();
+    }
+
+    refreshEditorPreview();
 
     if (m_selectedPuzzleId > 0 && m_database) {
-        m_database->upsertPuzzleImage(m_selectedPuzzleId, 0, m_pendingImageBytes);
+        m_database->upsertPuzzleImage(m_selectedPuzzleId, m_selectedImageSlot, m_pendingImageBytes);
+        m_slotPendingBytes.remove(m_selectedImageSlot);
         m_pendingImageBytes.clear();
         ++m_puzzleImageRevision;
         emit puzzleImageChanged();
     }
 
-    updatePreviewProvider();
-    setStatusMessage(QStringLiteral("Фото загружено — нажмите на объект, которого не хватает"));
+    setStatusMessage(QStringLiteral("Фото загружено в ячейку %1 — нажмите на объект")
+                         .arg(m_selectedImageSlot + 1));
     return true;
 }
 
 bool AdminViewModel::markMissingArea(double relX, double relY)
 {
+    return markMissingRegion(relX, relY, 0.0, 0.0);
+}
+
+bool AdminViewModel::markMissingRegion(double relX, double relY, double relW, double relH)
+{
+    if (m_imageProcessing) {
+        return false;
+    }
+
+    if (m_selectedImageSlot != 0) {
+        setStatusMessage(QStringLiteral("Маска доступна только для первой ячейки"));
+        return false;
+    }
+
     if (m_sourceImage.isNull()) {
         setStatusMessage(QStringLiteral("Сначала загрузите фото"));
         return false;
@@ -434,41 +683,53 @@ bool AdminViewModel::markMissingArea(double relX, double relY)
         return false;
     }
 
-    const QString contour = m_imageProcessor->extractContour(m_sourceImage, relX, relY, 24);
-    if (contour.isEmpty()) {
-        setStatusMessage(QStringLiteral("Не удалось выделить область — попробуйте другое место"));
-        return false;
-    }
+    const int jobId = ++m_regionJobId;
+    const QImage source = m_sourceImage;
+    ImageProcessor *processor = m_imageProcessor;
+    setImageProcessingBusy(true);
+    setStatusMessage(QStringLiteral("Обработка изображения…"));
 
-    m_maskContour = contour;
-    emit maskContourChanged();
+    auto *watcher = new QFutureWatcher<QString>(this);
+    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, jobId]() {
+        if (jobId == m_regionJobId) {
+            const QString contour = watcher->result();
+            if (contour.isEmpty()) {
+                setStatusMessage(QStringLiteral("Не удалось выделить объект — обведите его рамкой"));
+            } else {
+                m_maskContour = contour;
+                emit maskContourChanged();
+                if (m_imageProvider && m_selectedPuzzleId > 0) {
+                    m_imageProvider->invalidatePuzzle(m_selectedPuzzleId);
+                }
+                refreshEditorPreview();
+                setStatusMessage(QStringLiteral("Объект скрыт — так увидит игрок. Сохраните загадку"));
+            }
+        }
+        setImageProcessingBusy(false);
+        watcher->deleteLater();
+    });
+    watcher->setFuture(QtConcurrent::run([processor, source, relX, relY, relW, relH]() -> QString {
+        if (!processor) {
+            return {};
+        }
+        if (relW < 0.015 && relH < 0.015) {
+            return processor->extractContour(source, relX, relY, 24);
+        }
+        return processor->extractContourInRect(source, relX, relY, relW, relH);
+    }));
 
-    const QImage hidden = m_imageProcessor->applyHideMask(m_sourceImage, contour);
-    if (!hidden.isNull()) {
-        m_previewImage = hidden;
-        updatePreviewProvider();
-    }
-
-    setStatusMessage(QStringLiteral("Область выделена — нажмите «Сохранить загадку»"));
     return true;
 }
 
 void AdminViewModel::clearMask()
 {
-    m_maskContour.clear();
-    emit maskContourChanged();
-
-    if (m_selectedPuzzleId > 0 && m_database) {
-        const QByteArray data = m_database->puzzleImageData(m_selectedPuzzleId, 0);
-        if (!data.isEmpty()) {
-            m_sourceImage.loadFromData(data);
-            m_previewImage = m_sourceImage;
-        }
-    } else {
-        m_previewImage = m_sourceImage;
+    if (m_selectedImageSlot != 0) {
+        return;
     }
 
-    updatePreviewProvider();
+    m_maskContour.clear();
+    emit maskContourChanged();
+    refreshEditorPreview();
     setStatusMessage(QStringLiteral("Маска сброшена"));
 }
 
@@ -569,6 +830,8 @@ void AdminViewModel::loadPuzzleEditor(int puzzleId)
         return;
     }
 
+    m_slotImageCache.clear();
+    m_slotPendingBytes.clear();
     m_editAnswer = puzzle.correctAnswer;
     m_editHint = m_database->localizedString(puzzle.hintTextKey);
     m_selectedTemplateId = puzzle.templateId;
@@ -582,45 +845,30 @@ void AdminViewModel::loadPuzzleEditor(int puzzleId)
     }
     m_editQuotes = quotes.join(QStringLiteral("\n"));
 
-    m_maskContour.clear();
-    if (puzzle.templateId > 0) {
-        m_maskContour = m_database->maskTemplateContour(puzzle.templateId);
-    }
-    emit maskContourChanged();
+    m_selectedImageSlot = 0;
+    emit selectedImageSlotChanged();
+    emit imageSlotsChanged();
 
-    m_sourceImage = QImage();
-    m_previewImage = QImage();
-    const QByteArray imageData = m_database->puzzleImageData(puzzleId, 0);
-    if (!imageData.isEmpty()) {
-        m_sourceImage.loadFromData(imageData);
-        m_previewImage = m_sourceImage;
-    } else if (puzzle.templateId > 0) {
-        const QByteArray templateData = m_database->maskTemplateImageData(puzzle.templateId);
-        m_sourceImage.loadFromData(templateData);
-        m_previewImage = m_sourceImage;
-    }
-
-    if (!m_maskContour.isEmpty() && m_imageProcessor && !m_sourceImage.isNull()) {
-        const QImage hidden = m_imageProcessor->applyHideMask(m_sourceImage, m_maskContour);
-        if (!hidden.isNull()) {
-            m_previewImage = hidden;
-        }
-    }
-
-    m_pendingImageBytes.clear();
-    updatePreviewProvider();
-    ++m_puzzleImageRevision;
+    loadImageSlot(0);
 
     emit editAnswerChanged();
     emit editHintChanged();
     emit editQuotesChanged();
-    emit puzzleImageChanged();
+
+    if (isPhotoMaskRound()) {
+        setStatusMessage(hasMaskContour()
+                             ? QStringLiteral("Загадка #%1 — превью как в игре").arg(puzzle.sortOrder)
+                             : QStringLiteral("Загадка #%1 — загрузите фото и отметьте объект").arg(puzzle.sortOrder));
+    } else {
+        setStatusMessage(QStringLiteral("Загадка #%1").arg(puzzle.sortOrder));
+    }
 }
 
 void AdminViewModel::clearPuzzleEditor()
 {
     m_selectedPuzzleId = 0;
     m_selectedTemplateId = 0;
+    m_selectedImageSlot = 0;
     m_editAnswer.clear();
     m_editHint.clear();
     m_editQuotes.clear();
@@ -628,12 +876,16 @@ void AdminViewModel::clearPuzzleEditor()
     m_sourceImage = QImage();
     m_previewImage = QImage();
     m_pendingImageBytes.clear();
+    m_slotImageCache.clear();
+    m_slotPendingBytes.clear();
 
     if (m_imageProvider) {
         m_imageProvider->clearPreviewImage();
     }
 
     emit selectedPuzzleIdChanged();
+    emit selectedImageSlotChanged();
+    emit imageSlotsChanged();
     emit editAnswerChanged();
     emit editHintChanged();
     emit editQuotesChanged();

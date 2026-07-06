@@ -93,7 +93,9 @@ QString GameViewModel::puzzleHiddenImageUrl() const
 
 QString GameViewModel::puzzleDisplayImageUrl(int slotIndex) const
 {
-    if (m_layoutType == GameConstants::LayoutType::FullMask && !m_puzzleMaskContour.isEmpty()) {
+    if (m_layoutType == GameConstants::LayoutType::FullMask
+        && slotIndex == 0
+        && !m_puzzleMaskContour.isEmpty()) {
         return puzzleHiddenImageUrl();
     }
     return puzzleImageUrl(slotIndex);

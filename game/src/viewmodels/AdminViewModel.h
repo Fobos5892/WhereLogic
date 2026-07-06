@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QImage>
 #include <QObject>
 #include <QVariantList>
@@ -30,11 +31,15 @@ class AdminViewModel : public QObject
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
     Q_PROPERTY(QString previewImageUrl READ previewImageUrl NOTIFY previewImageChanged)
     Q_PROPERTY(QString puzzleImageUrl READ puzzleImageUrl NOTIFY puzzleImageChanged)
+    Q_PROPERTY(int imageSlotCount READ imageSlotCount NOTIFY imageSlotsChanged)
+    Q_PROPERTY(int selectedImageSlot READ selectedImageSlot WRITE setSelectedImageSlot NOTIFY selectedImageSlotChanged)
+    Q_PROPERTY(bool showGamePreview READ showGamePreview NOTIFY previewImageChanged)
     Q_PROPERTY(bool hasPreviewImage READ hasPreviewImage NOTIFY previewImageChanged)
     Q_PROPERTY(bool hasMaskContour READ hasMaskContour NOTIFY maskContourChanged)
     Q_PROPERTY(QString maskContour READ maskContour NOTIFY maskContourChanged)
     Q_PROPERTY(QString selectedRoundLayoutType READ selectedRoundLayoutType NOTIFY selectedRoundIdChanged)
     Q_PROPERTY(bool isPhotoMaskRound READ isPhotoMaskRound NOTIFY selectedRoundIdChanged)
+    Q_PROPERTY(bool imageProcessing READ imageProcessing NOTIFY imageProcessingChanged)
 
 public:
     explicit AdminViewModel(DatabaseManager *database, QObject *parent = nullptr);
@@ -59,11 +64,15 @@ public:
     QString statusMessage() const { return m_statusMessage; }
     QString previewImageUrl() const;
     QString puzzleImageUrl() const;
+    int imageSlotCount() const;
+    int selectedImageSlot() const { return m_selectedImageSlot; }
+    bool showGamePreview() const;
     bool hasPreviewImage() const { return !m_sourceImage.isNull(); }
     bool hasMaskContour() const { return !m_maskContour.isEmpty(); }
     QString maskContour() const { return m_maskContour; }
     QString selectedRoundLayoutType() const { return m_selectedRoundLayoutType; }
     bool isPhotoMaskRound() const { return m_selectedRoundLayoutType == QStringLiteral("FULL_MASK"); }
+    bool imageProcessing() const { return m_imageProcessing; }
 
     void setSelectedPresetId(int presetId);
     void setSelectedRoundId(int roundId);
@@ -71,6 +80,7 @@ public:
     void setEditAnswer(const QString &answer);
     void setEditHint(const QString &hint);
     void setEditQuotes(const QString &quotes);
+    void setSelectedImageSlot(int slot);
 
     Q_INVOKABLE void refreshPresets();
     Q_INVOKABLE void refreshCatalogRounds();
@@ -87,6 +97,9 @@ public:
     Q_INVOKABLE void deleteSelectedPuzzle();
     Q_INVOKABLE bool importPuzzleImage(const QUrl &fileUrl);
     Q_INVOKABLE bool markMissingArea(double relX, double relY);
+    Q_INVOKABLE bool markMissingRegion(double relX, double relY, double relW, double relH);
+    Q_INVOKABLE bool slotHasImage(int slotIndex) const;
+    Q_INVOKABLE QString slotThumbnailUrl(int slotIndex) const;
     Q_INVOKABLE void focusPhotoMaskRound();
     Q_INVOKABLE void startPhotoPuzzle();
     Q_INVOKABLE void clearMask();
@@ -109,6 +122,9 @@ signals:
     void previewImageChanged();
     void puzzleImageChanged();
     void maskContourChanged();
+    void imageSlotsChanged();
+    void selectedImageSlotChanged();
+    void imageProcessingChanged();
 
 private:
     void rebuildPresetList();
@@ -116,10 +132,14 @@ private:
     void rebuildPresetRoundIds();
     void rebuildPuzzleList();
     void loadPuzzleEditor(int puzzleId);
+    void loadImageSlot(int slotIndex);
+    void cacheCurrentSlotState();
+    void refreshEditorPreview();
     void clearPuzzleEditor();
     void setStatusMessage(const QString &message);
     void updatePreviewProvider();
     void bumpPreviewRevision();
+    void setImageProcessingBusy(bool busy);
     QString quoteSlotsJsonFromEditor() const;
 
     DatabaseManager *m_database = nullptr;
@@ -135,8 +155,13 @@ private:
     int m_selectedRoundId = 0;
     int m_selectedPuzzleId = 0;
     int m_selectedTemplateId = 0;
+    int m_selectedImageSlot = 0;
     int m_previewRevision = 0;
     int m_puzzleImageRevision = 0;
+    int m_previewJobId = 0;
+    int m_regionJobId = 0;
+    int m_processingJobs = 0;
+    bool m_imageProcessing = false;
 
     QString m_editPresetName;
     QString m_editAnswer;
@@ -148,4 +173,6 @@ private:
     QImage m_sourceImage;
     QImage m_previewImage;
     QByteArray m_pendingImageBytes;
+    QHash<int, QImage> m_slotImageCache;
+    QHash<int, QByteArray> m_slotPendingBytes;
 };

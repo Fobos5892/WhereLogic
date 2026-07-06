@@ -14,6 +14,29 @@ namespace {
 
 constexpr QLatin1String kTestPresetName("Тестовая игра");
 
+QString repairUtf8Mojibake(const QString &text)
+{
+    if (text.isEmpty() || !text.contains(QLatin1Char(0x00D0))) {
+        return text;
+    }
+
+    QByteArray bytes;
+    bytes.reserve(text.size());
+    for (const QChar ch : text) {
+        const ushort code = ch.unicode();
+        if (code > 0xFF) {
+            return text;
+        }
+        bytes.append(static_cast<char>(code));
+    }
+
+    const QString repaired = QString::fromUtf8(bytes);
+    if (repaired.isEmpty() || repaired == text) {
+        return text;
+    }
+    return repaired;
+}
+
 } // namespace
 
 DatabaseManager::DatabaseManager(QObject *parent)
@@ -89,6 +112,14 @@ bool DatabaseManager::initialize()
         hasTestPreset = presetCountQuery.value(0).toInt() > 0;
     }
     if (!hasTestPreset && !seedTestPreset()) {
+        return false;
+    }
+
+    if (!repairStoredTextEncoding()) {
+        return false;
+    }
+
+    if (!syncUiDefaultsToDatabase()) {
         return false;
     }
 
@@ -280,6 +311,119 @@ bool DatabaseManager::seedLanguagesAndStrings()
     return true;
 }
 
+bool DatabaseManager::repairStoredTextEncoding()
+{
+    QMutexLocker locker(&m_mutex);
+
+    QSqlQuery presetQuery(database());
+    if (!presetQuery.exec(QStringLiteral("SELECT id, preset_name FROM game_presets"))) {
+        emit databaseError(presetQuery.lastError().text());
+        return false;
+    }
+
+    while (presetQuery.next()) {
+        const int id = presetQuery.value(0).toInt();
+        const QString original = presetQuery.value(1).toString();
+        const QString fixed = repairUtf8Mojibake(original);
+        if (fixed == original) {
+            continue;
+        }
+
+        QSqlQuery updateQuery(database());
+        updateQuery.prepare(QStringLiteral("UPDATE game_presets SET preset_name = ? WHERE id = ?"));
+        updateQuery.addBindValue(fixed);
+        updateQuery.addBindValue(id);
+        if (!updateQuery.exec()) {
+            emit databaseError(updateQuery.lastError().text());
+            return false;
+        }
+    }
+
+    QSqlQuery stringQuery(database());
+    if (!stringQuery.exec(QStringLiteral(
+            "SELECT string_key, lang_code, translated_text FROM localization_strings"))) {
+        emit databaseError(stringQuery.lastError().text());
+        return false;
+    }
+
+    while (stringQuery.next()) {
+        const QString key = stringQuery.value(0).toString();
+        const QString lang = stringQuery.value(1).toString();
+        const QString original = stringQuery.value(2).toString();
+        const QString fixed = repairUtf8Mojibake(original);
+        if (fixed == original) {
+            continue;
+        }
+
+        QSqlQuery updateQuery(database());
+        updateQuery.prepare(QStringLiteral(
+            "UPDATE localization_strings SET translated_text = ? WHERE string_key = ? AND lang_code = ?"));
+        updateQuery.addBindValue(fixed);
+        updateQuery.addBindValue(key);
+        updateQuery.addBindValue(lang);
+        if (!updateQuery.exec()) {
+            emit databaseError(updateQuery.lastError().text());
+            return false;
+        }
+    }
+
+    QSqlQuery puzzleQuery(database());
+    if (!puzzleQuery.exec(QStringLiteral("SELECT id, correct_answer FROM puzzles"))) {
+        emit databaseError(puzzleQuery.lastError().text());
+        return false;
+    }
+
+    while (puzzleQuery.next()) {
+        const int id = puzzleQuery.value(0).toInt();
+        const QString original = puzzleQuery.value(1).toString();
+        const QString fixed = repairUtf8Mojibake(original);
+        if (fixed == original) {
+            continue;
+        }
+
+        QSqlQuery updateQuery(database());
+        updateQuery.prepare(QStringLiteral("UPDATE puzzles SET correct_answer = ? WHERE id = ?"));
+        updateQuery.addBindValue(fixed);
+        updateQuery.addBindValue(id);
+        if (!updateQuery.exec()) {
+            emit databaseError(updateQuery.lastError().text());
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool DatabaseManager::syncUiDefaultsToDatabase()
+{
+    const UiStringDefaults &defaults = UiStringDefaults::instance();
+    QMutexLocker locker(&m_mutex);
+
+    for (const QString &key : defaults.keys()) {
+        if (!key.startsWith(QStringLiteral("ui."))) {
+            continue;
+        }
+
+        const QString text = defaults.text(key);
+        if (text.isEmpty()) {
+            continue;
+        }
+
+        QSqlQuery query(database());
+        query.prepare(QStringLiteral(
+            "INSERT INTO localization_strings (string_key, lang_code, translated_text) VALUES (?, 'ru', ?) "
+            "ON CONFLICT(string_key, lang_code) DO UPDATE SET translated_text = excluded.translated_text"));
+        query.addBindValue(key);
+        query.addBindValue(text);
+        if (!query.exec()) {
+            emit databaseError(query.lastError().text());
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool DatabaseManager::seedCatalogRounds()
 {
     QMutexLocker locker(&m_mutex);
@@ -435,7 +579,7 @@ QVector<GamePresetInfo> DatabaseManager::listPresets() const
     while (query.next()) {
         GamePresetInfo info;
         info.id = query.value(0).toInt();
-        info.name = query.value(1).toString();
+        info.name = repairUtf8Mojibake(query.value(1).toString());
         info.roundCount = query.value(2).toInt();
         presets.append(info);
     }
@@ -977,7 +1121,7 @@ QString DatabaseManager::localizedString(const QString &key, const QString &lang
     }
 
     if (!result.isEmpty()) {
-        return result;
+        return repairUtf8Mojibake(result);
     }
 
     if (langCode == QStringLiteral("ru")) {

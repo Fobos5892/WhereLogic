@@ -21,6 +21,7 @@
         <file>qml/components/SmartTimer.qml</file>
         <file>qml/components/ScoreHUD.qml</file>
         <file>qml/components/MissingRevealOverlay.qml</file>
+        <file>qml/components/MaskRegionSelector.qml</file>
         <file>qml/components/layouts/StandardGridLayout.qml</file>
         <file>qml/components/layouts/EquationLayout.qml</file>
         <file>qml/components/layouts/FullMaskLayout.qml</file>

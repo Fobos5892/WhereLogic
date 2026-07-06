@@ -40,3 +40,8 @@ bool UiStringDefaults::contains(const QString &key) const
 {
     return m_strings.contains(key);
 }
+
+QStringList UiStringDefaults::keys() const
+{
+    return m_strings.keys();
+}

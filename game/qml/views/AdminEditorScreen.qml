@@ -78,6 +78,8 @@ Rectangle {
                 }
 
                 GameButton {
+                    Layout.fillWidth: true
+                    fillWidth: true
                     text: adminViewModel.label("ui.editor.photo_quick_start")
                     gold: true
                     onClicked: adminViewModel.startPhotoPuzzle()
@@ -86,12 +88,14 @@ Rectangle {
         }
 
         ScrollView {
+            id: editorScroll
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
             ColumnLayout {
-                width: Math.min(root.width - Theme.margin * 2, 960)
+                width: editorScroll.availableWidth
                 spacing: Theme.spacing * 1.5
 
                 NeonPanel {
@@ -113,18 +117,23 @@ Rectangle {
 
                         GameTextField {
                             Layout.fillWidth: true
+                            fillWidth: true
                             placeholderText: adminViewModel.label("ui.editor.preset_name")
                             text: adminViewModel.editPresetName
                             onTextEdited: function(t) { adminViewModel.editPresetName = t }
                         }
 
-                        Flow {
-                            Layout.fillWidth: true
-                            spacing: Theme.spacing
+                        Repeater {
+                            model: adminViewModel.presets
+                            delegate: Item {
+                                Layout.fillWidth: true
+                                implicitHeight: presetBtn.implicitHeight
 
-                            Repeater {
-                                model: adminViewModel.presets
-                                delegate: GameButton {
+                                GameButton {
+                                    id: presetBtn
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    fillWidth: true
                                     text: modelData.name
                                     primary: adminViewModel.selectedPresetId === modelData.id
                                     outline: adminViewModel.selectedPresetId !== modelData.id
@@ -133,24 +142,25 @@ Rectangle {
                             }
                         }
 
-                        Flow {
+                        GameButton {
                             Layout.fillWidth: true
-                            spacing: Theme.spacing
-
-                            GameButton {
-                                text: adminViewModel.label("ui.editor.new_preset")
-                                onClicked: adminViewModel.createPreset()
-                            }
-                            GameButton {
-                                text: adminViewModel.label("ui.editor.save_preset")
-                                onClicked: adminViewModel.savePresetMeta()
-                            }
-                            GameButton {
-                                text: adminViewModel.label("ui.editor.delete_preset")
-                                primary: false
-                                outline: true
-                                onClicked: adminViewModel.deleteSelectedPreset()
-                            }
+                            fillWidth: true
+                            text: adminViewModel.label("ui.editor.new_preset")
+                            onClicked: adminViewModel.createPreset()
+                        }
+                        GameButton {
+                            Layout.fillWidth: true
+                            fillWidth: true
+                            text: adminViewModel.label("ui.editor.save_preset")
+                            onClicked: adminViewModel.savePresetMeta()
+                        }
+                        GameButton {
+                            Layout.fillWidth: true
+                            fillWidth: true
+                            text: adminViewModel.label("ui.editor.delete_preset")
+                            primary: false
+                            outline: true
+                            onClicked: adminViewModel.deleteSelectedPreset()
                         }
                     }
                 }
@@ -174,17 +184,26 @@ Rectangle {
 
                         Repeater {
                             model: adminViewModel.catalogRounds
-                            delegate: GameButton {
+                            delegate: Item {
                                 Layout.fillWidth: true
-                                text: modelData.title + " (" + modelData.layoutType + ")"
-                                primary: root.roundEnabled(modelData.id)
-                                outline: !root.roundEnabled(modelData.id)
-                                onClicked: adminViewModel.togglePresetRound(modelData.id, !root.roundEnabled(modelData.id))
+                                implicitHeight: roundBtn.implicitHeight
+
+                                GameButton {
+                                    id: roundBtn
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    fillWidth: true
+                                    text: modelData.title + " (" + modelData.layoutType + ")"
+                                    primary: root.roundEnabled(modelData.id)
+                                    outline: !root.roundEnabled(modelData.id)
+                                    onClicked: adminViewModel.togglePresetRound(modelData.id, !root.roundEnabled(modelData.id))
+                                }
                             }
                         }
 
                         GameButton {
                             Layout.fillWidth: true
+                            fillWidth: true
                             text: adminViewModel.label("ui.editor.save_rounds")
                             gold: true
                             onClicked: adminViewModel.savePresetRounds()
@@ -209,41 +228,52 @@ Rectangle {
                             font.pixelSize: Theme.fontSizeBody
                         }
 
-                        Flow {
-                            Layout.fillWidth: true
-                            spacing: Theme.spacing
+                        Repeater {
+                            model: adminViewModel.catalogRounds
+                            delegate: Item {
+                                Layout.fillWidth: true
+                                visible: root.roundEnabled(modelData.id)
+                                implicitHeight: visible ? roundPickBtn.implicitHeight : 0
 
-                            Repeater {
-                                model: adminViewModel.catalogRounds
-                                delegate: GameButton {
+                                GameButton {
+                                    id: roundPickBtn
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    fillWidth: true
                                     text: modelData.title
                                     primary: adminViewModel.selectedRoundId === modelData.id
                                     outline: adminViewModel.selectedRoundId !== modelData.id
-                                    enabled: root.roundEnabled(modelData.id)
                                     onClicked: adminViewModel.selectedRoundId = modelData.id
                                 }
                             }
                         }
 
-                        Flow {
-                            Layout.fillWidth: true
-                            spacing: Theme.spacing
-                            visible: adminViewModel.selectedRoundId > 0
+                        Repeater {
+                            model: adminViewModel.puzzles
+                            delegate: Item {
+                                Layout.fillWidth: true
+                                visible: adminViewModel.selectedRoundId > 0
+                                implicitHeight: visible ? puzzlePickBtn.implicitHeight : 0
 
-                            Repeater {
-                                model: adminViewModel.puzzles
-                                delegate: GameButton {
+                                GameButton {
+                                    id: puzzlePickBtn
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    fillWidth: true
                                     text: "#" + modelData.sortOrder + " " + modelData.answer
                                     primary: adminViewModel.selectedPuzzleId === modelData.id
                                     outline: adminViewModel.selectedPuzzleId !== modelData.id
                                     onClicked: adminViewModel.selectPuzzle(modelData.id)
                                 }
                             }
+                        }
 
-                            GameButton {
-                                text: adminViewModel.label("ui.editor.new_puzzle")
-                                onClicked: adminViewModel.createPuzzle()
-                            }
+                        GameButton {
+                            Layout.fillWidth: true
+                            fillWidth: true
+                            visible: adminViewModel.selectedRoundId > 0
+                            text: adminViewModel.label("ui.editor.new_puzzle")
+                            onClicked: adminViewModel.createPuzzle()
                         }
                     }
                 }
@@ -268,6 +298,7 @@ Rectangle {
 
                         GameTextField {
                             Layout.fillWidth: true
+                            fillWidth: true
                             placeholderText: adminViewModel.label("ui.editor.answer")
                             text: adminViewModel.editAnswer
                             onTextEdited: function(t) { adminViewModel.editAnswer = t }
@@ -275,6 +306,7 @@ Rectangle {
 
                         GameTextField {
                             Layout.fillWidth: true
+                            fillWidth: true
                             placeholderText: adminViewModel.label("ui.editor.hint")
                             text: adminViewModel.editHint
                             onTextEdited: function(t) { adminViewModel.editHint = t }
@@ -322,23 +354,84 @@ Rectangle {
                             color: Theme.textSecondary
                             font.pixelSize: Theme.fontSizeCaption
                             wrapMode: Text.WordWrap
+                            visible: adminViewModel.imageSlotCount > 0
                         }
 
-                        Flow {
+                        Text {
+                            Layout.fillWidth: true
+                            visible: adminViewModel.showGamePreview
+                            text: adminViewModel.label("ui.editor.game_preview_hint")
+                            color: Theme.gold
+                            font.pixelSize: Theme.fontSizeCaption
+                            font.italic: true
+                            wrapMode: Text.WordWrap
+                        }
+
+                        RowLayout {
                             Layout.fillWidth: true
                             spacing: Theme.spacing
+                            visible: adminViewModel.imageSlotCount > 0
 
-                            GameButton {
-                                text: adminViewModel.label("ui.editor.pick_image")
-                                onClicked: imageFileDialog.open()
+                            Repeater {
+                                model: adminViewModel.imageSlotCount
+                                delegate: Item {
+                                    Layout.preferredWidth: 76
+                                    Layout.preferredHeight: 76
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: Theme.radius
+                                        color: Theme.surface
+                                        border.width: adminViewModel.selectedImageSlot === index ? 3 : Theme.borderWidth
+                                        border.color: adminViewModel.selectedImageSlot === index
+                                                      ? Theme.gold : Theme.secondary
+
+                                        Image {
+                                            anchors.fill: parent
+                                            anchors.margins: 4
+                                            source: adminViewModel.slotThumbnailUrl(index)
+                                            fillMode: Image.PreserveAspectCrop
+                                            visible: adminViewModel.slotHasImage(index)
+                                            cache: false
+                                        }
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            visible: !adminViewModel.slotHasImage(index)
+                                            text: (index + 1).toString()
+                                            color: Theme.textSecondary
+                                            font.pixelSize: Theme.fontSizeTitle
+                                            font.bold: true
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            onClicked: adminViewModel.selectedImageSlot = index
+                                        }
+                                    }
+                                }
                             }
-                            GameButton {
-                                text: adminViewModel.label("ui.editor.clear_mask")
-                                primary: false
-                                outline: true
-                                visible: adminViewModel.hasMaskContour
-                                onClicked: adminViewModel.clearMask()
-                            }
+                        }
+
+                        GameButton {
+                            Layout.fillWidth: true
+                            fillWidth: true
+                            visible: adminViewModel.imageSlotCount > 0
+                            text: adminViewModel.label("ui.editor.pick_image")
+                            enabled: adminViewModel.imageSlotCount > 0 && !adminViewModel.imageProcessing
+                            onClicked: imageFileDialog.open()
+                        }
+
+                        GameButton {
+                            Layout.fillWidth: true
+                            fillWidth: true
+                            text: adminViewModel.label("ui.editor.clear_mask")
+                            primary: false
+                            outline: true
+                            visible: adminViewModel.isPhotoMaskRound
+                                     && adminViewModel.selectedImageSlot === 0
+                                     && adminViewModel.hasMaskContour
+                            onClicked: adminViewModel.clearMask()
                         }
 
                         Rectangle {
@@ -355,42 +448,49 @@ Rectangle {
                                 source: adminViewModel.previewImageUrl
                                 fillMode: Image.PreserveAspectFit
                                 cache: false
+                                opacity: adminViewModel.imageProcessing ? 0.45 : 1
 
-                                MouseArea {
+                                MaskRegionSelector {
                                     anchors.fill: parent
-                                    onClicked: function(mouse) {
-                                        const pw = puzzlePreview.paintedWidth
-                                        const ph = puzzlePreview.paintedHeight
-                                        if (pw <= 0 || ph <= 0) {
-                                            return
-                                        }
-                                        const left = (puzzlePreview.width - pw) / 2
-                                        const top = (puzzlePreview.height - ph) / 2
-                                        const rx = (mouse.x - left) / pw
-                                        const ry = (mouse.y - top) / ph
-                                        if (rx >= 0 && rx <= 1 && ry >= 0 && ry <= 1) {
-                                            adminViewModel.markMissingArea(rx, ry)
-                                        }
+                                    imageItem: puzzlePreview
+                                    active: adminViewModel.isPhotoMaskRound
+                                          && adminViewModel.selectedImageSlot === 0
+                                          && !adminViewModel.imageProcessing
+                                    onRegionSelected: function(relX, relY, relW, relH) {
+                                        adminViewModel.markMissingRegion(relX, relY, relW, relH)
                                     }
                                 }
                             }
+
+                            BusyIndicator {
+                                anchors.centerIn: parent
+                                running: adminViewModel.imageProcessing
+                            }
                         }
 
-                        Flow {
+                        Text {
                             Layout.fillWidth: true
-                            spacing: Theme.spacing
+                            visible: adminViewModel.imageSlotCount > 1
+                            text: adminViewModel.label("ui.editor.slot_pick_hint")
+                            color: Theme.textSecondary
+                            font.pixelSize: Theme.fontSizeCaption
+                            wrapMode: Text.WordWrap
+                        }
 
-                            GameButton {
-                                text: adminViewModel.label("ui.editor.save_puzzle")
-                                gold: true
-                                onClicked: adminViewModel.savePuzzle()
-                            }
-                            GameButton {
-                                text: adminViewModel.label("ui.editor.delete_puzzle")
-                                primary: false
-                                outline: true
-                                onClicked: adminViewModel.deleteSelectedPuzzle()
-                            }
+                        GameButton {
+                            Layout.fillWidth: true
+                            fillWidth: true
+                            text: adminViewModel.label("ui.editor.save_puzzle")
+                            gold: true
+                            onClicked: adminViewModel.savePuzzle()
+                        }
+                        GameButton {
+                            Layout.fillWidth: true
+                            fillWidth: true
+                            text: adminViewModel.label("ui.editor.delete_puzzle")
+                            primary: false
+                            outline: true
+                            onClicked: adminViewModel.deleteSelectedPuzzle()
                         }
                     }
                 }

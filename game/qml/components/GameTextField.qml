@@ -9,10 +9,13 @@ Item {
     property alias text: field.text
     property alias readOnly: field.readOnly
 
+    property bool fillWidth: true
+
     signal textEdited(string text)
 
     implicitWidth: 280
     implicitHeight: Theme.buttonHeight
+    width: fillWidth && parent ? parent.width : implicitWidth
 
     Rectangle {
         anchors.fill: parent

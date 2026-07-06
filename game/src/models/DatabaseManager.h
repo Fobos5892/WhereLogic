@@ -126,6 +126,8 @@ private:
     bool createSchema();
     bool executeSchemaStatements();
     bool seedLanguagesAndStrings();
+    bool repairStoredTextEncoding();
+    bool syncUiDefaultsToDatabase();
     bool insertCatalogRound(int id,
                             const QString &titleKey,
                             const QString &ruleKey,

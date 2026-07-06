@@ -13,8 +13,9 @@ Item {
 
     signal clicked()
 
-    implicitWidth: fillWidth ? parent.width : Math.max(Theme.touchMin * 2.2, label.implicitWidth + Theme.spacing * 3)
+    implicitWidth: Math.max(Theme.touchMin * 2.2, label.implicitWidth + Theme.spacing * 3)
     implicitHeight: Theme.buttonHeight
+    width: fillWidth && parent ? parent.width : implicitWidth
 
     Rectangle {
         id: bg

@@ -14,6 +14,25 @@ void PuzzleImageProvider::setImageProcessor(ImageProcessor *processor)
     m_imageProcessor = processor;
 }
 
+void PuzzleImageProvider::invalidatePuzzle(int puzzleId)
+{
+    QMutexLocker locker(&m_cacheMutex);
+    const QString prefix = QString::number(puzzleId) + QLatin1Char(':');
+    for (auto it = m_hiddenCache.begin(); it != m_hiddenCache.end();) {
+        if (it.key().startsWith(prefix)) {
+            it = m_hiddenCache.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void PuzzleImageProvider::clearHiddenCache()
+{
+    QMutexLocker locker(&m_cacheMutex);
+    m_hiddenCache.clear();
+}
+
 QImage PuzzleImageProvider::requestImage(const QString &id, QSize *size, const QSize &requestedSize)
 {
     Q_UNUSED(requestedSize)
@@ -71,22 +90,38 @@ QImage PuzzleImageProvider::loadPuzzleImage(int puzzleId, int slotIndex) const
 
 QImage PuzzleImageProvider::loadHiddenPuzzleImage(int puzzleId) const
 {
+    const PuzzleInfo puzzle = m_database->puzzleById(puzzleId);
+    if (puzzle.templateId <= 0) {
+        return loadPuzzleImage(puzzleId, 0);
+    }
+
+    const QString contour = m_database->maskTemplateContour(puzzle.templateId);
+    if (contour.isEmpty()) {
+        return loadPuzzleImage(puzzleId, 0);
+    }
+
+    const QString cacheKey = QStringLiteral("%1:%2").arg(puzzleId).arg(QString::number(qHash(contour)));
+    {
+        QMutexLocker locker(&m_cacheMutex);
+        const auto it = m_hiddenCache.constFind(cacheKey);
+        if (it != m_hiddenCache.constEnd()) {
+            return it.value();
+        }
+    }
+
     QImage image = loadPuzzleImage(puzzleId, 0);
     if (image.isNull() || !m_imageProcessor) {
         return image;
     }
 
-    const PuzzleInfo puzzle = m_database->puzzleById(puzzleId);
-    if (puzzle.templateId <= 0) {
-        return image;
+    const QImage hidden = m_imageProcessor->applyHideMask(image, contour);
+    if (!hidden.isNull()) {
+        QMutexLocker locker(&m_cacheMutex);
+        m_hiddenCache.insert(cacheKey, hidden);
+        return hidden;
     }
 
-    const QString contour = m_database->maskTemplateContour(puzzle.templateId);
-    if (contour.isEmpty()) {
-        return image;
-    }
-
-    return m_imageProcessor->applyHideMask(image, contour);
+    return image;
 }
 
 void PuzzleImageProvider::setPreviewImage(const QImage &image)

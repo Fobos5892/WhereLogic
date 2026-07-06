@@ -1,6 +1,8 @@
 #pragma once
 
+#include <QHash>
 #include <QImage>
+#include <QMutex>
 #include <QQuickImageProvider>
 
 class DatabaseManager;
@@ -12,6 +14,8 @@ public:
     explicit PuzzleImageProvider(DatabaseManager *database);
 
     void setImageProcessor(ImageProcessor *processor);
+    void invalidatePuzzle(int puzzleId);
+    void clearHiddenCache();
 
     QImage requestImage(const QString &id, QSize *size, const QSize &requestedSize) override;
 
@@ -25,4 +29,6 @@ private:
     DatabaseManager *m_database = nullptr;
     ImageProcessor *m_imageProcessor = nullptr;
     QImage m_previewImage;
+    mutable QMutex m_cacheMutex;
+    mutable QHash<QString, QImage> m_hiddenCache;
 };
