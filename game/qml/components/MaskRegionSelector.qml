@@ -7,13 +7,18 @@ Item {
     required property Item imageItem
     property bool active: true
     property real minDragPixels: 12
+    property bool selecting: false
+    readonly property bool pointerLocked: selecting || regionDrag.active
 
     signal regionSelected(real relX, real relY, real relW, real relH)
 
     property point startPoint
     property point endPoint
-    property bool selecting: false
-    property bool touchHoldActive: false
+    property bool hasPendingRect: false
+    property real pendingX: 0
+    property real pendingY: 0
+    property real pendingW: 0
+    property real pendingH: 0
 
     function imageLayout() {
         if (!imageItem || imageItem.paintedWidth <= 0 || imageItem.paintedHeight <= 0) {
@@ -27,15 +32,28 @@ Item {
         }
     }
 
-    function isTouchPointer(mouse) {
-        return mouse.pointingDevice
-               && mouse.pointingDevice.pointerType === PointerDevice.Touch
-    }
-
     function beginSelection(x, y) {
+        hasPendingRect = false
         startPoint = Qt.point(x, y)
         endPoint = startPoint
         selecting = true
+    }
+
+    function endSelection(x, y) {
+        if (!selecting) {
+            return
+        }
+        endPoint = Qt.point(x, y)
+        selecting = false
+        commitSelection()
+    }
+
+    function storePendingRect(x1, y1, w, h) {
+        pendingX = x1
+        pendingY = y1
+        pendingW = w
+        pendingH = h
+        hasPendingRect = w > 2 || h > 2
     }
 
     function commitSelection() {
@@ -51,6 +69,7 @@ Item {
 
         const dragW = x2 - x1
         const dragH = y2 - y1
+        storePendingRect(x1, y1, dragW, dragH)
 
         const nx1 = (x1 - layout.left) / layout.pw
         const ny1 = (y1 - layout.top) / layout.ph
@@ -78,50 +97,41 @@ Item {
         }
     }
 
-    MouseArea {
-        id: touchArea
-        anchors.fill: parent
+    Connections {
+        target: adminViewModel
+        function onMaskContourChanged() {
+            if (adminViewModel.hasMaskContour && !root.selecting) {
+                hasPendingRect = false
+            }
+        }
+        function onMaskProcessingChanged() {
+            if (!adminViewModel.maskProcessing && !adminViewModel.hasMaskContour && !root.selecting) {
+                hasPendingRect = false
+            }
+        }
+    }
+
+    DragHandler {
+        id: regionDrag
         enabled: root.active
-        pressAndHoldInterval: 420
-        preventStealing: true
+        target: null
+        dragThreshold: 0
+        grabPermissions: PointerHandler.CanTakeOverFromHandlersOfDifferentType
 
-        onPressed: function(mouse) {
-            if (isTouchPointer(mouse)) {
-                touchHoldActive = false
-                return
+        onActiveChanged: {
+            const p = centroid.position
+            if (active) {
+                beginSelection(p.x, p.y)
+            } else if (selecting) {
+                endSelection(p.x, p.y)
             }
-            beginSelection(mouse.x, mouse.y)
         }
 
-        onPressAndHold: function(mouse) {
-            touchHoldActive = true
-            beginSelection(mouse.x, mouse.y)
-        }
-
-        onPositionChanged: function(mouse) {
-            if (!selecting) {
+        onCentroidChanged: {
+            if (!active || !selecting) {
                 return
             }
-            if (isTouchPointer(mouse) && !touchHoldActive) {
-                return
-            }
-            endPoint = Qt.point(mouse.x, mouse.y)
-        }
-
-        onReleased: function(mouse) {
-            if (!selecting) {
-                touchHoldActive = false
-                return
-            }
-            selecting = false
-            touchHoldActive = false
-            endPoint = Qt.point(mouse.x, mouse.y)
-            commitSelection()
-        }
-
-        onCanceled: {
-            selecting = false
-            touchHoldActive = false
+            endPoint = Qt.point(centroid.position.x, centroid.position.y)
         }
     }
 
@@ -137,16 +147,30 @@ Item {
         color: "#33FFD700"
         border.color: Theme.gold
         border.width: 2
+        z: 3
 
         Text {
             anchors.bottom: parent.top
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.bottomMargin: 4
-            visible: touchHoldActive || touchArea.pressed
+            visible: regionDrag.active
             text: adminViewModel.label("ui.editor.region_drag_hint")
             color: Theme.gold
             font.pixelSize: Theme.fontSizeCaption
             font.bold: true
         }
+    }
+
+    Rectangle {
+        visible: !selecting && hasPendingRect && adminViewModel.maskProcessing
+        x: pendingX
+        y: pendingY
+        width: pendingW
+        height: pendingH
+        radius: 3
+        color: "#22FFFFFF"
+        border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.85)
+        border.width: 2
+        z: 3
     }
 }

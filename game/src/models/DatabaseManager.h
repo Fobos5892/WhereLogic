@@ -91,7 +91,8 @@ public:
     bool updatePuzzle(int puzzleId,
                        const QString &answer,
                        const QString &hintText,
-                       const QString &quoteSlotsJson = {});
+                       const QString &quoteSlotsJson = {},
+                       const QString &answerOptionsJson = {});
     bool deletePuzzle(int puzzleId);
     bool setPuzzleTemplateId(int puzzleId, int templateId);
 
@@ -127,6 +128,7 @@ private:
     bool executeSchemaStatements();
     bool seedLanguagesAndStrings();
     bool repairStoredTextEncoding();
+    bool removeDuplicatePresets();
     bool syncUiDefaultsToDatabase();
     bool insertCatalogRound(int id,
                             const QString &titleKey,

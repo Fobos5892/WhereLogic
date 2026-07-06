@@ -40,8 +40,25 @@ class AdminViewModel : public QObject
     Q_PROPERTY(QString selectedRoundLayoutType READ selectedRoundLayoutType NOTIFY selectedRoundIdChanged)
     Q_PROPERTY(bool isPhotoMaskRound READ isPhotoMaskRound NOTIFY selectedRoundIdChanged)
     Q_PROPERTY(bool imageProcessing READ imageProcessing NOTIFY imageProcessingChanged)
+    Q_PROPERTY(bool maskProcessing READ maskProcessing NOTIFY maskProcessingChanged)
+
+    Q_PROPERTY(bool roundConfigOpen READ roundConfigOpen NOTIFY roundConfigOpenChanged)
+    Q_PROPERTY(QString configRoundTitle READ configRoundTitle NOTIFY roundConfigOpenChanged)
+    Q_PROPERTY(bool configUsesImages READ configUsesImages NOTIFY roundConfigOpenChanged)
+    Q_PROPERTY(bool configUsesTexts READ configUsesTexts NOTIFY roundConfigOpenChanged)
+    Q_PROPERTY(int configImageSlotCount READ configImageSlotCount NOTIFY roundConfigOpenChanged)
+    Q_PROPERTY(int configTextSlotCount READ configTextSlotCount NOTIFY roundConfigOpenChanged)
+    Q_PROPERTY(int answerOptionCount READ answerOptionCount NOTIFY answerOptionsChanged)
+    Q_PROPERTY(int maxAnswerOptions READ maxAnswerOptions CONSTANT)
 
 public:
+    enum RoundDataStatus {
+        DataEmpty = 0,
+        DataPartial = 1,
+        DataComplete = 2
+    };
+    Q_ENUM(RoundDataStatus)
+
     explicit AdminViewModel(DatabaseManager *database, QObject *parent = nullptr);
 
     void setImageProcessor(ImageProcessor *processor);
@@ -73,6 +90,16 @@ public:
     QString selectedRoundLayoutType() const { return m_selectedRoundLayoutType; }
     bool isPhotoMaskRound() const { return m_selectedRoundLayoutType == QStringLiteral("FULL_MASK"); }
     bool imageProcessing() const { return m_imageProcessing; }
+    bool maskProcessing() const { return m_maskProcessing; }
+
+    bool roundConfigOpen() const { return m_roundConfigOpen; }
+    QString configRoundTitle() const { return m_configRoundTitle; }
+    bool configUsesImages() const { return configImageSlotCount() > 0; }
+    bool configUsesTexts() const { return configTextSlotCount() > 0; }
+    int configImageSlotCount() const;
+    int configTextSlotCount() const;
+    int answerOptionCount() const { return m_answerOptions.size(); }
+    int maxAnswerOptions() const { return 10; }
 
     void setSelectedPresetId(int presetId);
     void setSelectedRoundId(int roundId);
@@ -89,8 +116,22 @@ public:
     Q_INVOKABLE void createPreset();
     Q_INVOKABLE void savePresetMeta();
     Q_INVOKABLE void deleteSelectedPreset();
+    Q_INVOKABLE void deletePreset(int presetId);
+    Q_INVOKABLE int roundTemplateStatus(int roundId) const;
     Q_INVOKABLE void togglePresetRound(int roundId, bool enabled);
     Q_INVOKABLE void savePresetRounds();
+    Q_INVOKABLE bool isRoundEnabled(int roundId) const;
+    Q_INVOKABLE void setRoundEnabled(int roundId, bool enabled);
+    Q_INVOKABLE void openRoundConfig(int roundId);
+    Q_INVOKABLE void closeRoundConfig();
+    Q_INVOKABLE void saveRoundConfig();
+    Q_INVOKABLE void addAnswerOption();
+    Q_INVOKABLE QString cardTextAt(int index) const;
+    Q_INVOKABLE void setCardTextAt(int index, const QString &text);
+    Q_INVOKABLE QString answerOptionAt(int index) const;
+    Q_INVOKABLE void setAnswerOptionAt(int index, const QString &text);
+    Q_INVOKABLE QString cardTextPlaceholder(int index) const;
+    Q_INVOKABLE QString answerOptionPlaceholder() const;
     Q_INVOKABLE void selectPuzzle(int puzzleId);
     Q_INVOKABLE void createPuzzle();
     Q_INVOKABLE void savePuzzle();
@@ -125,6 +166,10 @@ signals:
     void imageSlotsChanged();
     void selectedImageSlotChanged();
     void imageProcessingChanged();
+    void maskProcessingChanged();
+    void roundConfigOpenChanged();
+    void answerOptionsChanged();
+    void cardTextsChanged();
 
 private:
     void rebuildPresetList();
@@ -141,6 +186,11 @@ private:
     void bumpPreviewRevision();
     void setImageProcessingBusy(bool busy);
     QString quoteSlotsJsonFromEditor() const;
+    QString answerOptionsJsonFromEditor() const;
+    void ensureConfigCardTextSize();
+    static int imageSlotCountForLayout(const QString &layoutType);
+    static int textSlotCountForLayout(const QString &layoutType);
+    int evaluateRoundTemplateStatus(int roundId) const;
 
     DatabaseManager *m_database = nullptr;
     ImageProcessor *m_imageProcessor = nullptr;
@@ -162,6 +212,7 @@ private:
     int m_regionJobId = 0;
     int m_processingJobs = 0;
     bool m_imageProcessing = false;
+    bool m_maskProcessing = false;
 
     QString m_editPresetName;
     QString m_editAnswer;
@@ -170,6 +221,10 @@ private:
     QString m_statusMessage;
     QString m_maskContour;
     QString m_selectedRoundLayoutType;
+    bool m_roundConfigOpen = false;
+    QString m_configRoundTitle;
+    QStringList m_configCardTexts;
+    QStringList m_answerOptions;
     QImage m_sourceImage;
     QImage m_previewImage;
     QByteArray m_pendingImageBytes;

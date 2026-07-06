@@ -1,9 +1,10 @@
 import QtQuick
-import QtQuick.Layouts
 import ".."
 import "../components"
 
 Item {
+    anchors.fill: parent
+
     readonly property var layoutMap: ({
         "STANDARD": "qrc:/qml/components/layouts/StandardGridLayout.qml",
         "EQUATION": "qrc:/qml/components/layouts/EquationLayout.qml",
@@ -14,129 +15,139 @@ Item {
         "BLITZ_STANDARD": "qrc:/qml/components/layouts/BlitzGridLayout.qml"
     })
 
-    ColumnLayout {
-        anchors.fill: parent
+    NeonPanel {
+        id: headerPanel
+        anchors.top: parent.top
         anchors.topMargin: 80
-        spacing: Theme.spacing
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: Theme.margin
+        anchors.rightMargin: Theme.margin
 
-        NeonPanel {
-            Layout.fillWidth: true
-            implicitHeight: headerCol.implicitHeight + Theme.spacing * 2
+        Column {
+            width: headerPanel.innerWidth
+            spacing: 4
 
-            ColumnLayout {
-                id: headerCol
-                anchors.fill: parent
-                spacing: 4
-
-                RowLayout {
-                    Layout.fillWidth: true
-
-                    Text {
-                        Layout.fillWidth: true
-                        text: gameViewModel.roundTitle
-                        color: Theme.gold
-                        font.pixelSize: Theme.fontSizeTitle
-                        font.bold: true
-                        wrapMode: Text.WordWrap
-                    }
-
-                    SmartTimer { Layout.alignment: Qt.AlignRight | Qt.AlignVCenter }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: gameViewModel.ruleText
-                    color: Theme.textSecondary
-                    font.pixelSize: Theme.fontSizeCaption
-                    wrapMode: Text.WordWrap
-                    visible: gameViewModel.ruleText.length > 0
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: gameViewModel.hintText.length > 0
-                          ? gameViewModel.label("ui.game.hint_format").arg(gameViewModel.hintText)
-                          : ""
-                    color: Theme.primary
-                    font.pixelSize: Theme.fontSizeCaption
-                    font.italic: true
-                    wrapMode: Text.WordWrap
-                    visible: gameViewModel.hintText.length > 0
-                              && gameViewModel.cardsFaceUp
-                }
-            }
-        }
-
-        Loader {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            source: layoutMap[gameViewModel.layoutType]
-                    || "qrc:/qml/components/layouts/StandardGridLayout.qml"
-        }
-
-        // Панель ответа — крупные кнопки для пальцев
-        NeonPanel {
-            Layout.fillWidth: true
-            visible: gameViewModel.showLocalControls
-            implicitHeight: controlsCol.implicitHeight + Theme.spacing * 2
-
-            ColumnLayout {
-                id: controlsCol
-                anchors.fill: parent
+            Row {
+                width: parent.width
                 spacing: Theme.spacing
 
-                GameTextField {
-                    id: answerField
-                    Layout.fillWidth: true
-                    placeholderText: gameViewModel.label("ui.game.answer_placeholder")
-                    text: gameViewModel.userAnswer
-                    onTextEdited: function(t) { gameViewModel.userAnswer = t }
+                Text {
+                    width: Math.max(0, parent.width - timer.width - parent.spacing)
+                    text: gameViewModel.roundTitle
+                    color: Theme.gold
+                    font.pixelSize: Theme.fontSizeTitle
+                    font.bold: true
+                    wrapMode: Text.WordWrap
                 }
 
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-
-                    GameButton {
-                        text: gameViewModel.label("ui.game.submit")
-                        gold: true
-                        onClicked: gameViewModel.submitAnswer(answerField.text)
-                    }
-                    GameButton {
-                        visible: gameViewModel.currentStage === "STAGE_CLOSED_CARDS"
-                        text: gameViewModel.label("ui.game.ready")
-                        onClicked: gameViewModel.ready()
-                    }
-                    GameButton {
-                        visible: gameViewModel.currentStage === "STAGE_MAIN_TURN"
-                               || gameViewModel.currentStage === "STAGE_STEAL_TURN"
-                        text: gameViewModel.label("ui.game.transfer")
-                        primary: false
-                        outline: true
-                        onClicked: gameViewModel.transferTurn()
-                    }
+                SmartTimer {
+                    id: timer
+                    anchors.verticalCenter: parent.verticalCenter
                 }
+            }
 
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-                    visible: gameViewModel.showLocalControls
-                             && gameViewModel.currentStage === "STAGE_RESOLUTION"
+            Text {
+                width: parent.width
+                text: gameViewModel.ruleText
+                color: Theme.textSecondary
+                font.pixelSize: Theme.fontSizeCaption
+                wrapMode: Text.WordWrap
+                visible: gameViewModel.ruleText.length > 0
+            }
 
-                    GameButton {
-                        text: gameViewModel.teamAName
-                        onClicked: gameViewModel.resolveTeamA()
-                    }
-                    GameButton {
-                        text: gameViewModel.teamBName
-                        onClicked: gameViewModel.resolveTeamB()
-                    }
-                    GameButton {
-                        text: gameViewModel.label("ui.game.reject_all")
-                        primary: false
-                        outline: true
-                        onClicked: gameViewModel.rejectAll()
-                    }
+            Text {
+                width: parent.width
+                text: gameViewModel.hintText.length > 0
+                      ? gameViewModel.label("ui.game.hint_format").arg(gameViewModel.hintText)
+                      : ""
+                color: Theme.primary
+                font.pixelSize: Theme.fontSizeCaption
+                font.italic: true
+                wrapMode: Text.WordWrap
+                visible: gameViewModel.hintText.length > 0 && gameViewModel.cardsFaceUp
+            }
+        }
+    }
+
+    Loader {
+        id: layoutLoader
+        anchors.top: headerPanel.bottom
+        anchors.topMargin: Theme.spacing
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: controlsPanel.visible ? controlsPanel.top : parent.bottom
+        anchors.bottomMargin: controlsPanel.visible ? Theme.spacing : 0
+        anchors.leftMargin: Theme.margin
+        anchors.rightMargin: Theme.margin
+        source: layoutMap[gameViewModel.layoutType]
+                || "qrc:/qml/components/layouts/StandardGridLayout.qml"
+    }
+
+    NeonPanel {
+        id: controlsPanel
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: Theme.margin
+        visible: gameViewModel.showLocalControls
+
+        Column {
+            width: controlsPanel.innerWidth
+            spacing: Theme.spacing
+
+            GameTextField {
+                id: answerField
+                width: parent.width
+                fillWidth: true
+                placeholderText: gameViewModel.label("ui.game.answer_placeholder")
+                text: gameViewModel.userAnswer
+                onTextEdited: function(t) { gameViewModel.userAnswer = t }
+            }
+
+            Flow {
+                width: parent.width
+                spacing: Theme.spacing
+
+                GameButton {
+                    text: gameViewModel.label("ui.game.submit")
+                    gold: true
+                    onClicked: gameViewModel.submitAnswer(answerField.text)
+                }
+                GameButton {
+                    visible: gameViewModel.currentStage === "STAGE_CLOSED_CARDS"
+                    text: gameViewModel.label("ui.game.ready")
+                    onClicked: gameViewModel.ready()
+                }
+                GameButton {
+                    visible: gameViewModel.currentStage === "STAGE_MAIN_TURN"
+                           || gameViewModel.currentStage === "STAGE_STEAL_TURN"
+                    text: gameViewModel.label("ui.game.transfer")
+                    primary: false
+                    outline: true
+                    onClicked: gameViewModel.transferTurn()
+                }
+            }
+
+            Flow {
+                width: parent.width
+                spacing: Theme.spacing
+                visible: gameViewModel.showLocalControls
+                         && gameViewModel.currentStage === "STAGE_RESOLUTION"
+
+                GameButton {
+                    text: gameViewModel.teamAName
+                    onClicked: gameViewModel.resolveTeamA()
+                }
+                GameButton {
+                    text: gameViewModel.teamBName
+                    onClicked: gameViewModel.resolveTeamB()
+                }
+                GameButton {
+                    text: gameViewModel.label("ui.game.reject_all")
+                    primary: false
+                    outline: true
+                    onClicked: gameViewModel.rejectAll()
                 }
             }
         }

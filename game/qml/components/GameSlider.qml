@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import ".."
 
@@ -12,48 +11,107 @@ Item {
 
     implicitHeight: Theme.buttonHeight
 
+    readonly property real _ratio: control.to === control.from
+        ? 0
+        : (control.value - control.from) / (control.to - control.from)
+
     RowLayout {
         anchors.fill: parent
         spacing: Theme.spacing
 
-        Slider {
-            id: slider
+        Item {
+            id: trackHost
             Layout.fillWidth: true
-            from: control.from
-            to: control.to
-            value: control.value
-            onMoved: control.value = Math.round(value)
-            onPressedChanged: {
-                if (!pressed) {
-                    control.value = Math.round(value)
-                }
-            }
+            Layout.preferredHeight: 22
 
-            background: Rectangle {
-                x: slider.leftPadding
-                y: slider.topPadding + slider.availableHeight / 2 - height / 2
-                width: slider.availableWidth
+            Rectangle {
+                id: track
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width
                 height: 6
                 radius: 3
                 color: Theme.surfaceAlt
 
                 Rectangle {
-                    width: slider.visualPosition * parent.width
+                    width: control._ratio * parent.width
                     height: parent.height
                     radius: parent.radius
                     color: Theme.primary
                 }
             }
 
-            handle: Rectangle {
-                x: slider.leftPadding + slider.visualPosition * (slider.availableWidth - width)
-                y: slider.topPadding + slider.availableHeight / 2 - height / 2
+            Rectangle {
+                id: handle
+                y: (trackHost.height - height) / 2
                 width: 22
                 height: 22
                 radius: Theme.radius
                 color: Theme.gold
                 border.color: Theme.primary
                 border.width: Theme.borderWidth
+                x: control._ratio * Math.max(0, track.width - width)
+
+                MouseArea {
+                    anchors.fill: parent
+                    drag.target: handle
+                    drag.axis: Drag.XAxis
+                    drag.minimumX: 0
+                    drag.maximumX: track.width - handle.width
+
+                    onPositionChanged: {
+                        if (!pressed) {
+                            return
+                        }
+                        const span = track.width - handle.width
+                        if (span <= 0) {
+                            return
+                        }
+                        const ratio = handle.x / span
+                        control.value = Math.round(control.from + ratio * (control.to - control.from))
+                    }
+
+                    onReleased: {
+                        const span = track.width - handle.width
+                        if (span <= 0) {
+                            return
+                        }
+                        const ratio = handle.x / span
+                        control.value = Math.round(control.from + ratio * (control.to - control.from))
+                    }
+                }
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                onClicked: function(mouse) {
+                    const span = track.width - handle.width
+                    if (span <= 0) {
+                        return
+                    }
+                    const clickX = Math.min(Math.max(mouse.x - handle.width / 2, 0), span)
+                    handle.x = clickX
+                    const ratio = clickX / span
+                    control.value = Math.round(control.from + ratio * (control.to - control.from))
+                }
+            }
+
+            onWidthChanged: {
+                const span = track.width - handle.width
+                if (span <= 0) {
+                    return
+                }
+                handle.x = control._ratio * span
+            }
+
+            Connections {
+                target: control
+                function onValueChanged() {
+                    const span = track.width - handle.width
+                    if (span <= 0) {
+                        return
+                    }
+                    handle.x = control._ratio * span
+                }
             }
         }
 

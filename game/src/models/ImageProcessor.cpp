@@ -8,6 +8,7 @@
 #include <QBuffer>
 
 #include <algorithm>
+#include <cmath>
 
 namespace {
 
@@ -95,31 +96,203 @@ QString contourPointsFromPolygon(const std::vector<cv::Point> &polygon, int cols
     return points.join(QLatin1Char(';'));
 }
 
-QString largestContourString(const cv::Mat &binaryMask, int cols, int rows)
+cv::Rect relRectToPixelRect(double relX,
+                            double relY,
+                            double relW,
+                            double relH,
+                            int imgW,
+                            int imgH)
 {
-    std::vector<std::vector<cv::Point>> contours;
-    cv::findContours(binaryMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-    if (contours.empty()) {
+    relX = std::clamp(relX, 0.0, 1.0);
+    relY = std::clamp(relY, 0.0, 1.0);
+    relW = std::clamp(relW, 0.0, 1.0 - relX);
+    relH = std::clamp(relH, 0.0, 1.0 - relY);
+
+    const int x = std::clamp(static_cast<int>(relX * imgW), 0, std::max(0, imgW - 1));
+    const int y = std::clamp(static_cast<int>(relY * imgH), 0, std::max(0, imgH - 1));
+    const int w = std::clamp(static_cast<int>(std::lround(relW * imgW)), 1, imgW - x);
+    const int h = std::clamp(static_cast<int>(std::lround(relH * imgH)), 1, imgH - y);
+    return {x, y, w, h};
+}
+
+cv::Rect clampRectForGrabCut(const cv::Rect &rect, int imgW, int imgH)
+{
+    cv::Rect bounded = rect & cv::Rect(0, 0, imgW, imgH);
+    if (bounded.width < 4 || bounded.height < 4) {
         return {};
     }
 
-    size_t bestIdx = 0;
-    double largest = 0.0;
-    for (size_t i = 0; i < contours.size(); ++i) {
-        const double area = cv::contourArea(contours[i]);
-        if (area > largest) {
-            largest = area;
-            bestIdx = i;
-        }
+    if (bounded.x < 1) {
+        bounded.width -= 1 - bounded.x;
+        bounded.x = 1;
+    }
+    if (bounded.y < 1) {
+        bounded.height -= 1 - bounded.y;
+        bounded.y = 1;
+    }
+    if (bounded.x + bounded.width >= imgW) {
+        bounded.width = imgW - bounded.x - 1;
+    }
+    if (bounded.y + bounded.height >= imgH) {
+        bounded.height = imgH - bounded.y - 1;
+    }
+
+    if (bounded.width < 4 || bounded.height < 4) {
+        return {};
+    }
+    return bounded;
+}
+
+bool contourTouchesImageBorder(const cv::Rect &box, int imgW, int imgH)
+{
+    return box.x <= 0 || box.y <= 0 || (box.x + box.width) >= imgW || (box.y + box.height) >= imgH;
+}
+
+QString contourStringFromPolygon(const std::vector<cv::Point> &polygon, int cols, int rows)
+{
+    if (polygon.size() < 3) {
+        return {};
     }
 
     std::vector<cv::Point> simplified;
-    cv::approxPolyDP(contours[bestIdx], simplified, 2.0, true);
+    cv::approxPolyDP(polygon, simplified, 2.0, true);
     if (simplified.size() < 3) {
-        simplified = contours[bestIdx];
+        simplified = polygon;
     }
 
     return contourPointsFromPolygon(simplified, cols, rows);
+}
+
+bool pickBestForegroundContour(const std::vector<std::vector<cv::Point>> &contours,
+                               const cv::Rect &selection,
+                               int imgW,
+                               int imgH,
+                               std::vector<cv::Point> *bestContour)
+{
+    if (!bestContour) {
+        return false;
+    }
+
+    const cv::Point selectionCenter(selection.x + selection.width / 2,
+                                    selection.y + selection.height / 2);
+    const double imgArea = static_cast<double>(imgW * imgH);
+    const double selectionArea = static_cast<double>(std::max(1, selection.area()));
+
+    double bestScore = -1e9;
+    bool found = false;
+
+    for (const std::vector<cv::Point> &contour : contours) {
+        if (contour.size() < 3) {
+            continue;
+        }
+
+        const double area = cv::contourArea(contour);
+        if (area < 40.0 || area > imgArea * 0.7) {
+            continue;
+        }
+
+        if (cv::pointPolygonTest(contour, selectionCenter, false) < 0) {
+            continue;
+        }
+
+        const cv::Rect box = cv::boundingRect(contour);
+        const cv::Rect inter = box & selection;
+        if (inter.area() <= 0) {
+            continue;
+        }
+
+        const double insideSelection = static_cast<double>(inter.area())
+                                       / std::max(1.0, static_cast<double>(box.area()));
+        const double selectionFill = area / selectionArea;
+        const bool touchesBorder = contourTouchesImageBorder(box, imgW, imgH);
+        if (touchesBorder && area > imgArea * 0.25) {
+            continue;
+        }
+
+        const double score = insideSelection * 0.55 + selectionFill * 0.35
+                             - (area / imgArea) * 0.45 - (touchesBorder ? 0.12 : 0.0);
+        if (score > bestScore) {
+            bestScore = score;
+            *bestContour = contour;
+            found = true;
+        }
+    }
+
+    return found;
+}
+
+QString extractContourWithGrabCut(const cv::Mat &bgr, const cv::Rect &selection)
+{
+    const int imgW = bgr.cols;
+    const int imgH = bgr.rows;
+    const cv::Rect grabRect = clampRectForGrabCut(selection, imgW, imgH);
+    if (grabRect.empty()) {
+        return {};
+    }
+
+    cv::Mat gcMask(imgH, imgW, CV_8UC1, cv::Scalar(cv::GC_BGD));
+    cv::Mat bgdModel;
+    cv::Mat fgdModel;
+    cv::grabCut(bgr, gcMask, grabRect, bgdModel, fgdModel, 5, cv::GC_INIT_WITH_RECT);
+
+    cv::Mat fgMask = (gcMask == cv::GC_FGD) | (gcMask == cv::GC_PR_FGD);
+    fgMask.convertTo(fgMask, CV_8UC1, 255);
+
+    cv::Mat selectionMask = cv::Mat::zeros(imgH, imgW, CV_8UC1);
+    cv::rectangle(selectionMask, selection, cv::Scalar(255), cv::FILLED);
+    cv::bitwise_and(fgMask, selectionMask, fgMask);
+
+    const cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
+    cv::morphologyEx(fgMask, fgMask, cv::MORPH_CLOSE, kernel);
+    cv::morphologyEx(fgMask, fgMask, cv::MORPH_OPEN, kernel);
+
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(fgMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+    std::vector<cv::Point> bestContour;
+    if (!pickBestForegroundContour(contours, selection, imgW, imgH, &bestContour)) {
+        return {};
+    }
+
+    return contourStringFromPolygon(bestContour, imgW, imgH);
+}
+
+void drawDashedPolygon(cv::Mat &bgr, const std::vector<cv::Point> &polygon, const cv::Scalar &color, int thickness)
+{
+    if (polygon.size() < 2) {
+        return;
+    }
+
+    constexpr int dashLen = 7;
+    constexpr int gapLen = 5;
+
+    const size_t count = polygon.size();
+    for (size_t i = 0; i < count; ++i) {
+        const cv::Point p0 = polygon[i];
+        const cv::Point p1 = polygon[(i + 1) % count];
+        const double dx = static_cast<double>(p1.x - p0.x);
+        const double dy = static_cast<double>(p1.y - p0.y);
+        const double length = std::hypot(dx, dy);
+        if (length < 1.0) {
+            continue;
+        }
+
+        const double ux = dx / length;
+        const double uy = dy / length;
+        double traveled = 0.0;
+        bool draw = true;
+        while (traveled < length) {
+            const int segment = draw ? dashLen : gapLen;
+            const double next = std::min(length, traveled + segment);
+            if (draw) {
+                const cv::Point a(static_cast<int>(p0.x + ux * traveled), static_cast<int>(p0.y + uy * traveled));
+                const cv::Point b(static_cast<int>(p0.x + ux * next), static_cast<int>(p0.y + uy * next));
+                cv::line(bgr, a, b, color, thickness, cv::LINE_AA);
+            }
+            traveled = next;
+            draw = !draw;
+        }
+    }
 }
 #endif
 
@@ -205,6 +378,10 @@ QString ImageProcessor::extractContour(const QImage &image, double relX, double 
                 continue;
             }
             const int area = static_cast<int>(cv::contourArea(contour));
+            const cv::Rect box = cv::boundingRect(contour);
+            if (contourTouchesImageBorder(box, bgr.cols, bgr.rows) && area > bgr.cols * bgr.rows * 0.25) {
+                continue;
+            }
             if (area > bestArea) {
                 bestArea = area;
                 bestMask = regionMask.clone();
@@ -232,10 +409,19 @@ QString ImageProcessor::extractContour(const QImage &image, double relX, double 
     double largest = 0.0;
     for (size_t i = 0; i < finalContours.size(); ++i) {
         const double area = cv::contourArea(finalContours[i]);
+        const cv::Rect box = cv::boundingRect(finalContours[i]);
+        if (contourTouchesImageBorder(box, bgr.cols, bgr.rows) && area > bgr.cols * bgr.rows * 0.25) {
+            continue;
+        }
         if (area > largest) {
             largest = area;
             bestIdx = i;
         }
+    }
+
+    if (largest <= 0.0) {
+        emit processingFailed(QStringLiteral("No contour found"));
+        return {};
     }
 
     std::vector<cv::Point> simplified;
@@ -274,50 +460,29 @@ QString ImageProcessor::extractContourInRect(const QImage &image,
     emit processingFailed(QStringLiteral("OpenCV is not available"));
     return {};
 #else
-    relW = std::max(relW, 0.0);
-    relH = std::max(relH, 0.0);
-
-    if (relW < 0.015 && relH < 0.015) {
-        return extractContour(image, relX + relW * 0.5, relY + relH * 0.5, 24);
-    }
-
     const QImage workImage = downscaleWorkImage(image);
     cv::Mat mat = qImageToMat(workImage);
     cv::Mat bgr;
     cv::cvtColor(mat, bgr, cv::COLOR_RGBA2BGR);
 
-    const int cols = bgr.cols;
-    const int rows = bgr.rows;
+    const int imgW = bgr.cols;
+    const int imgH = bgr.rows;
+    const cv::Rect selection = relRectToPixelRect(relX, relY, relW, relH, imgW, imgH);
 
-    int x = std::clamp(static_cast<int>(relX * cols), 0, cols - 1);
-    int y = std::clamp(static_cast<int>(relY * rows), 0, rows - 1);
-    int w = std::clamp(static_cast<int>(relW * cols), 1, cols - x);
-    int h = std::clamp(static_cast<int>(relH * rows), 1, rows - y);
-
-    if (w < 6 || h < 6) {
-        return extractContour(image, relX + relW * 0.5, relY + relH * 0.5, 24);
+    QString contour;
+    if (selection.width >= 4 && selection.height >= 4) {
+        contour = extractContourWithGrabCut(bgr, selection);
     }
-
-    cv::Rect roi(x, y, w, h);
-    cv::Mat grabcutMask(rows, cols, CV_8UC1, cv::Scalar(cv::GC_BGD));
-    cv::Mat bgdModel;
-    cv::Mat fgdModel;
-    cv::grabCut(bgr, grabcutMask, roi, bgdModel, fgdModel, 2, cv::GC_INIT_WITH_RECT);
-
-    cv::Mat fgMask = (grabcutMask == cv::GC_FGD) | (grabcutMask == cv::GC_PR_FGD);
-    fgMask.convertTo(fgMask, CV_8UC1, 255);
-
-    const cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5));
-    cv::morphologyEx(fgMask, fgMask, cv::MORPH_CLOSE, kernel);
-    cv::morphologyEx(fgMask, fgMask, cv::MORPH_OPEN, kernel);
-
-    QString contour = largestContourString(fgMask, cols, rows);
 
     if (contour.isEmpty()) {
         const double cx = relX + relW * 0.5;
         const double cy = relY + relH * 0.5;
         contour = extractContour(image, cx, cy, 24);
-        return contour;
+    }
+
+    if (contour.isEmpty()) {
+        emit processingFailed(QStringLiteral("No contour found"));
+        return {};
     }
 
     emit contourExtracted(contour);
@@ -369,15 +534,43 @@ QImage ImageProcessor::applyHideMask(const QImage &image, const QString &contour
         return image;
     }
 
-    const cv::Mat dilateKernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5));
-    cv::dilate(mask, mask, dilateKernel);
-
     cv::Mat bgr;
     cv::cvtColor(mat, bgr, cv::COLOR_RGBA2BGR);
 
-    cv::Mat blurred;
-    cv::GaussianBlur(bgr, blurred, cv::Size(0, 0), 16.0);
-    blurred.copyTo(bgr, mask);
+    const cv::Scalar light(232, 237, 242);
+    const cv::Scalar dark(26, 34, 48);
+    constexpr int tile = 10;
+
+    for (int y = 0; y < bgr.rows; ++y) {
+        for (int x = 0; x < bgr.cols; ++x) {
+            if (mask.at<uchar>(y, x) == 0) {
+                continue;
+            }
+            const cv::Scalar fill = ((x / tile) + (y / tile)) % 2 == 0 ? light : dark;
+            bgr.at<cv::Vec3b>(y, x) = cv::Vec3b(
+                static_cast<uchar>(fill[0]),
+                static_cast<uchar>(fill[1]),
+                static_cast<uchar>(fill[2]));
+        }
+    }
+
+    const std::vector<cv::Point> polygon = contourStringToPolygon(contourPoints, mat.cols, mat.rows);
+    if (!polygon.empty()) {
+        drawDashedPolygon(bgr, polygon, cv::Scalar(255, 255, 255), 2);
+        drawDashedPolygon(bgr, polygon, cv::Scalar(0, 0, 0), 1);
+
+        const cv::Moments moments = cv::moments(mask, true);
+        if (moments.m00 > 0.0) {
+            const int cx = static_cast<int>(moments.m10 / moments.m00);
+            const int cy = static_cast<int>(moments.m01 / moments.m00);
+            const std::string mark = "?";
+            const double fontScale = std::clamp(std::min(mat.cols, mat.rows) / 180.0, 0.8, 2.4);
+            const cv::Size textSize = cv::getTextSize(mark, cv::FONT_HERSHEY_DUPLEX, fontScale, 2, nullptr);
+            const cv::Point origin(cx - textSize.width / 2, cy + textSize.height / 2);
+            cv::putText(bgr, mark, origin, cv::FONT_HERSHEY_DUPLEX, fontScale, cv::Scalar(0, 0, 0), 4, cv::LINE_AA);
+            cv::putText(bgr, mark, origin, cv::FONT_HERSHEY_DUPLEX, fontScale, cv::Scalar(255, 255, 255), 2, cv::LINE_AA);
+        }
+    }
 
     cv::Mat rgba;
     cv::cvtColor(bgr, rgba, cv::COLOR_BGR2RGBA);

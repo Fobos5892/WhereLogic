@@ -23,17 +23,17 @@ Item {
         radius: Theme.radius
         color: {
             if (outline)
-                return "transparent"
+                return Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.35)
             if (gold)
                 return Theme.gold
             if (primary)
                 return Theme.primary
-            return Theme.surfaceAlt
+            return Qt.lighter(Theme.surfaceAlt, 1.08)
         }
         border.width: Theme.borderWidth
         border.color: gold ? Theme.gold : (primary ? Theme.primary : Theme.secondary)
         scale: mouse.pressed ? 0.96 : 1.0
-        opacity: enabled ? 1.0 : 0.45
+        opacity: enabled ? (mouse.containsMouse ? 1.0 : 0.96) : 0.45
 
         Behavior on scale { NumberAnimation { duration: Theme.animFast; easing.type: Easing.OutQuad } }
 
@@ -43,13 +43,14 @@ Item {
             text: control.text
             font.bold: true
             font.pixelSize: Theme.fontSizeButton
-            color: outline ? Theme.primary : Theme.textOnAccent
+            color: outline ? Qt.lighter(Theme.primary, 1.08) : Theme.textOnAccent
         }
     }
 
     MouseArea {
         id: mouse
         anchors.fill: parent
+        hoverEnabled: true
         enabled: control.enabled
         onClicked: control.clicked()
     }

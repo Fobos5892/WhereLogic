@@ -53,9 +53,11 @@ contains(CONFIG, no_opencv) {
 
     exists($$OPENCV_ROOT/opencv_qmake.pri) {
         include($$OPENCV_ROOT/opencv_qmake.pri)
-        !isEmpty(OPENCV_LIB_CORE) {
+        !isEmpty(OPENCV_LIB_CORE):exists($$OPENCV_LIB_CORE):exists($$OPENCV_LIB_IMGPROC):exists($$OPENCV_LIB_IMGCODECS) {
             LIBS += $$OPENCV_LIB_CORE $$OPENCV_LIB_IMGPROC $$OPENCV_LIB_IMGCODECS
             OPENCV_READY = true
+        } else:!isEmpty(OPENCV_LIB_CORE) {
+            message("OpenCV: opencv_qmake.pri points to missing .dll.a files — rebuild prebuilt or use CONFIG+=no_opencv")
         }
     }
 
@@ -98,7 +100,7 @@ contains(CONFIG, no_opencv) {
             OPENCV_IMGCODECS = $$first($$OPENCV_IMGCODECS_CAND)
         }
 
-        !isEmpty(OPENCV_CORE):!isEmpty(OPENCV_IMGPROC):!isEmpty(OPENCV_IMGCODECS) {
+        !isEmpty(OPENCV_CORE):!isEmpty(OPENCV_IMGPROC):!isEmpty(OPENCV_IMGCODECS):exists($$OPENCV_CORE):exists($$OPENCV_IMGPROC):exists($$OPENCV_IMGCODECS) {
             LIBS += $$OPENCV_CORE $$OPENCV_IMGPROC $$OPENCV_IMGCODECS
             OPENCV_BINDIR = $$OPENCV_ROOT/x64/mingw/bin
             OPENCV_READY = true

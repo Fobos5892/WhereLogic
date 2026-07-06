@@ -1,10 +1,10 @@
 import QtQuick
-import QtQuick.Layouts
 import "."
 import "components"
 
 Item {
     id: root
+    readonly property bool overlaysOpen: settingsOverlay.visible || adminEditorOverlay.visible
 
     readonly property var stages: ({
         "STAGE_WELCOME": "qrc:/qml/views/WelcomeScreen.qml",
@@ -37,22 +37,36 @@ Item {
         anchors.leftMargin: Theme.touchMin + Theme.spacing
         visible: gameViewModel.currentStage !== "STAGE_WELCOME"
                  && gameViewModel.currentStage !== "STAGE_TEAM_SETUP"
+                 && !root.overlaysOpen
     }
 
-    // Кнопка настроек (шестерёнка)
-    GameButton {
+    IconButton {
+        id: settingsButton
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.margins: Theme.spacing
-        width: Theme.touchMin
-        height: Theme.touchMin
-        text: "\u2699"
-        primary: false
+        visible: !root.overlaysOpen
+        iconSource: "qrc:/qml/assets/icon-settings.svg"
         outline: true
         onClicked: settingsOverlay.visible = true
     }
 
-    // Оверлей настроек
+    GameButton {
+        id: resumeButton
+        anchors.verticalCenter: settingsButton.verticalCenter
+        anchors.right: settingsButton.left
+        anchors.rightMargin: Theme.spacing * 0.75
+        visible: !root.overlaysOpen
+                 && gameViewModel.currentStage !== "STAGE_WELCOME"
+                 && gameViewModel.currentStage !== "STAGE_TEAM_SETUP"
+                 && gameViewModel.currentStage !== "STAGE_FINAL_VICTORY"
+                 && gameViewModel.hasActiveSession
+        text: gameViewModel.label("ui.welcome.continue")
+        primary: false
+        outline: true
+        onClicked: gameViewModel.resumeSession()
+    }
+
     Rectangle {
         id: settingsOverlay
         anchors.fill: parent
@@ -66,22 +80,16 @@ Item {
         }
 
         NeonPanel {
+            id: settingsPanel
             anchors.centerIn: parent
             width: Math.min(parent.width * 0.9, 480)
-            implicitHeight: settingsCol.implicitHeight + Theme.spacing * 3
 
-            MouseArea {
-                anchors.fill: parent
-                onClicked: {} // блокируем закрытие при тапе внутри
-            }
-
-            ColumnLayout {
-                id: settingsCol
-                anchors.fill: parent
+            Column {
+                width: settingsPanel.innerWidth
                 spacing: Theme.spacing
 
                 Text {
-                    Layout.fillWidth: true
+                    width: parent.width
                     text: gameViewModel.label("ui.settings.title")
                     color: Theme.primary
                     font.pixelSize: Theme.fontSizeTitle
@@ -90,7 +98,7 @@ Item {
                 }
 
                 Text {
-                    Layout.fillWidth: true
+                    width: parent.width
                     text: gameViewModel.label("ui.settings.pin_hint")
                     color: Theme.textSecondary
                     font.pixelSize: Theme.fontSizeCaption
@@ -98,7 +106,7 @@ Item {
                 }
 
                 Text {
-                    Layout.fillWidth: true
+                    width: parent.width
                     text: networkServer.currentPin
                     color: Theme.gold
                     font.pixelSize: Theme.fontSizeHero
@@ -108,7 +116,7 @@ Item {
                 }
 
                 Text {
-                    Layout.fillWidth: true
+                    width: parent.width
                     text: networkServer.remoteConnected
                           ? gameViewModel.label("ui.settings.remote_connected")
                           : gameViewModel.label("ui.settings.remote_waiting")
@@ -118,7 +126,8 @@ Item {
                 }
 
                 GameButton {
-                    Layout.fillWidth: true
+                    width: parent.width
+                    fillWidth: true
                     text: gameViewModel.label("ui.settings.content_editor")
                     gold: true
                     onClicked: {
@@ -130,26 +139,28 @@ Item {
                 }
 
                 Text {
-                    Layout.fillWidth: true
+                    width: parent.width
                     text: gameViewModel.label("ui.settings.volume")
                     color: Theme.textSecondary
                     font.pixelSize: Theme.fontSizeCaption
                 }
 
                 GameSlider {
-                    Layout.fillWidth: true
+                    width: parent.width
                     value: audioSettings.volume
                     onValueChanged: audioSettings.volume = value
                 }
 
                 GameButton {
-                    Layout.fillWidth: true
+                    width: parent.width
+                    fillWidth: true
                     text: gameViewModel.label("ui.settings.close")
                     onClicked: settingsOverlay.visible = false
                 }
 
                 GameButton {
-                    Layout.fillWidth: true
+                    width: parent.width
+                    fillWidth: true
                     text: gameViewModel.label("ui.settings.quit")
                     primary: false
                     outline: true
@@ -164,6 +175,11 @@ Item {
         anchors.fill: parent
         visible: false
         z: 400
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: {}
+        }
 
         AdminEditorScreen {
             anchors.fill: parent

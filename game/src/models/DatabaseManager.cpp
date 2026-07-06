@@ -119,6 +119,10 @@ bool DatabaseManager::initialize()
         return false;
     }
 
+    if (!removeDuplicatePresets()) {
+        return false;
+    }
+
     if (!syncUiDefaultsToDatabase()) {
         return false;
     }
@@ -388,6 +392,49 @@ bool DatabaseManager::repairStoredTextEncoding()
         if (!updateQuery.exec()) {
             emit databaseError(updateQuery.lastError().text());
             return false;
+        }
+    }
+
+    return true;
+}
+
+bool DatabaseManager::removeDuplicatePresets()
+{
+    QMutexLocker locker(&m_mutex);
+
+    QSqlQuery groupsQuery(database());
+    if (!groupsQuery.exec(QStringLiteral(
+            "SELECT preset_name FROM game_presets "
+            "GROUP BY preset_name HAVING COUNT(*) > 1"))) {
+        emit databaseError(groupsQuery.lastError().text());
+        return false;
+    }
+
+    while (groupsQuery.next()) {
+        const QString presetName = groupsQuery.value(0).toString();
+
+        QSqlQuery idsQuery(database());
+        idsQuery.prepare(QStringLiteral(
+            "SELECT id FROM game_presets WHERE preset_name = ? ORDER BY id"));
+        idsQuery.addBindValue(presetName);
+        if (!idsQuery.exec()) {
+            emit databaseError(idsQuery.lastError().text());
+            return false;
+        }
+
+        QVector<int> ids;
+        while (idsQuery.next()) {
+            ids.append(idsQuery.value(0).toInt());
+        }
+
+        for (int i = 1; i < ids.size(); ++i) {
+            QSqlQuery deleteQuery(database());
+            deleteQuery.prepare(QStringLiteral("DELETE FROM game_presets WHERE id = ?"));
+            deleteQuery.addBindValue(ids.at(i));
+            if (!deleteQuery.exec()) {
+                emit databaseError(deleteQuery.lastError().text());
+                return false;
+            }
         }
     }
 
@@ -823,7 +870,8 @@ int DatabaseManager::createPuzzle(int roundId, const QString &answer, const QStr
 bool DatabaseManager::updatePuzzle(int puzzleId,
                                    const QString &answer,
                                    const QString &hintText,
-                                   const QString &quoteSlotsJson)
+                                   const QString &quoteSlotsJson,
+                                   const QString &answerOptionsJson)
 {
     QMutexLocker locker(&m_mutex);
 
@@ -841,10 +889,12 @@ bool DatabaseManager::updatePuzzle(int puzzleId,
 
     QSqlQuery query(database());
     query.prepare(QStringLiteral(
-        "UPDATE puzzles SET correct_answer = ?, hint_text_key = ?, puzzle_quote_slots = ? WHERE id = ?"));
+        "UPDATE puzzles SET correct_answer = ?, hint_text_key = ?, puzzle_quote_slots = ?, correct_order = ? "
+        "WHERE id = ?"));
     query.addBindValue(answer.trimmed());
     query.addBindValue(hintKey);
     query.addBindValue(quoteSlotsJson.isEmpty() ? QVariant() : quoteSlotsJson);
+    query.addBindValue(answerOptionsJson.isEmpty() ? QVariant() : answerOptionsJson);
     query.addBindValue(puzzleId);
     if (!query.exec()) {
         emit databaseError(query.lastError().text());

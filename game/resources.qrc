@@ -8,6 +8,7 @@
         <file>qml/views/TeamSetupScreen.qml</file>
         <file>qml/views/AdminMainScreen.qml</file>
         <file>qml/views/AdminEditorScreen.qml</file>
+        <file>qml/views/RoundConfigOverlay.qml</file>
         <file>qml/views/UniversalGameField.qml</file>
         <file>qml/views/InterRoundScreen.qml</file>
         <file>qml/views/FinalVictoryScreen.qml</file>
@@ -22,6 +23,28 @@
         <file>qml/components/ScoreHUD.qml</file>
         <file>qml/components/MissingRevealOverlay.qml</file>
         <file>qml/components/MaskRegionSelector.qml</file>
+        <file>qml/components/MaskContourOverlay.qml</file>
+        <file>qml/components/ImageSlotPlaceholder.qml</file>
+        <file>qml/components/DataStatusIcon.qml</file>
+        <file>qml/components/DashedAddButton.qml</file>
+        <file>qml/components/TrashButton.qml</file>
+        <file>qml/components/GameCheckBox.qml</file>
+        <file>qml/components/LoadingSpinner.qml</file>
+        <file>qml/components/HiResImage.qml</file>
+        <file>qml/components/IconButton.qml</file>
+        <file>qml/components/ThemedScrollBar.qml</file>
+        <file>qml/assets/icon-trash.svg</file>
+        <file>qml/assets/icon-check.svg</file>
+        <file>qml/assets/icon-status-empty.svg</file>
+        <file>qml/assets/icon-status-partial.svg</file>
+        <file>qml/assets/icon-status-done.svg</file>
+        <file>qml/assets/icon-settings.svg</file>
+        <file>qml/assets/icon-fullscreen.svg</file>
+        <file>qml/assets/icon-restore.svg</file>
+        <file>qml/assets/icon-add.svg</file>
+        <file>qml/assets/slot-empty.svg</file>
+        <file>qml/assets/slot-add-wide.svg</file>
+        <file>qml/assets/spinner.svg</file>
         <file>qml/components/layouts/StandardGridLayout.qml</file>
         <file>qml/components/layouts/EquationLayout.qml</file>
         <file>qml/components/layouts/FullMaskLayout.qml</file>

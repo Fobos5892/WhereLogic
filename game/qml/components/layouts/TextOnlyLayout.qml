@@ -13,11 +13,10 @@ Item {
             model: Math.max(gameViewModel.quoteSlots.length, 3)
             delegate: NeonPanel {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 72
 
                 Text {
-                    anchors.fill: parent
-                    anchors.margins: Theme.spacing
+                    width: parent.width
+                    height: 72
                     text: gameViewModel.cardsFaceUp && gameViewModel.quoteSlots.length > index
                           ? gameViewModel.quoteSlots[index]
                           : gameViewModel.label("ui.card.quote_format").arg(index + 1)

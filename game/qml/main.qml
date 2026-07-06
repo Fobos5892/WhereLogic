@@ -7,10 +7,10 @@ import "components"
 
 ApplicationWindow {
     id: root
-    width: 1280
-    height: 720
-    minimumWidth: 640
-    minimumHeight: 360
+    width: 960
+    height: 540
+    minimumWidth: 480
+    minimumHeight: 270
     visible: true
     title: gameViewModel.label("ui.app.title")
     color: Theme.background
@@ -18,12 +18,14 @@ ApplicationWindow {
     flags: Qt.Window | Qt.FramelessWindowHint
     visibility: Window.Windowed
 
+    Component.onCompleted: Theme.window = root
+
     // Перетаскивание окна (когда не на весь экран)
     MouseArea {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: 44
+        height: Theme.touchMin * 0.75
         z: 50
         visible: root.visibility === Window.Windowed
         onPressed: function(mouse) {
@@ -54,6 +56,7 @@ ApplicationWindow {
     }
 
     MainContainer {
+        id: mainContainer
         anchors.fill: parent
         anchors.margins: Theme.margin * 0.5
     }
@@ -63,6 +66,7 @@ ApplicationWindow {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.margins: Theme.spacing
+        visible: !mainContainer.overlaysOpen
         window: root
     }
 }

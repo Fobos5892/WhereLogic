@@ -1,14 +1,15 @@
 import QtQuick
 import QtQuick.Window
 import ".."
+import "."
 
 Item {
     id: control
 
     property Window window: null
 
-    implicitWidth: 36
-    implicitHeight: 36
+    implicitWidth: Theme.chromeSize
+    implicitHeight: Theme.chromeSize
 
     readonly property bool isFullscreen: window
             && (window.visibility === Window.FullScreen
@@ -22,15 +23,17 @@ Item {
         border.width: Theme.borderWidth
         opacity: mouse.pressed ? 0.8 : 1.0
         scale: mouse.pressed ? 0.94 : 1.0
-
         Behavior on scale { NumberAnimation { duration: Theme.animFast } }
+    }
 
-        Text {
-            anchors.centerIn: parent
-            text: control.isFullscreen ? "\u29C9" : "\u26F6"
-            color: Theme.primary
-            font.pixelSize: 16
-        }
+    HiResImage {
+        anchors.centerIn: parent
+        width: Theme.iconSm
+        height: Theme.iconSm
+        source: control.isFullscreen
+                ? "qrc:/qml/assets/icon-restore.svg"
+                : "qrc:/qml/assets/icon-fullscreen.svg"
+        resolutionScale: 3
     }
 
     MouseArea {
@@ -38,12 +41,14 @@ Item {
         anchors.fill: parent
         hoverEnabled: true
         onClicked: {
-            if (!control.window)
+            if (!control.window) {
                 return
-            if (control.isFullscreen)
+            }
+            if (control.isFullscreen) {
                 control.window.visibility = Window.Windowed
-            else
+            } else {
                 control.window.visibility = Window.FullScreen
+            }
         }
     }
 }
