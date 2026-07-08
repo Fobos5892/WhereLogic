@@ -62,7 +62,18 @@ QImage PuzzleImageProvider::requestImage(const QString &id, QSize *size, const Q
 
     QImage image;
     if (parts.size() >= 2 && parts.at(1) == QStringLiteral("hide")) {
-        image = loadHiddenPuzzleImage(puzzleId);
+        QVector<int> revealed;
+        if (parts.size() >= 3) {
+            const QStringList revealedParts = parts.at(2).split(QLatin1Char(','), Qt::SkipEmptyParts);
+            for (const QString &part : revealedParts) {
+                bool ok = false;
+                const int number = part.toInt(&ok);
+                if (ok && number > 0) {
+                    revealed.append(number);
+                }
+            }
+        }
+        image = loadHiddenPuzzleImage(puzzleId, revealed);
     } else {
         const int slotIndex = parts.size() >= 2 ? parts.at(1).toInt() : 0;
         image = loadPuzzleImage(puzzleId, slotIndex);
@@ -88,19 +99,56 @@ QImage PuzzleImageProvider::loadPuzzleImage(int puzzleId, int slotIndex) const
     return image;
 }
 
-QImage PuzzleImageProvider::loadHiddenPuzzleImage(int puzzleId) const
+QVector<MaskLayer> PuzzleImageProvider::maskLayersForPuzzle(int puzzleId) const
 {
+    QVector<MaskLayer> layers;
+    if (!m_database || puzzleId <= 0) {
+        return layers;
+    }
+
+    const QVector<PuzzleMaskInfo> masks = m_database->listPuzzleMasks(puzzleId);
+    layers.reserve(masks.size());
+    for (const PuzzleMaskInfo &mask : masks) {
+        MaskLayer layer;
+        layer.number = mask.sortOrder;
+        layer.contour = mask.contourPoints;
+        layers.append(layer);
+    }
+
+    if (!layers.isEmpty()) {
+        return layers;
+    }
+
     const PuzzleInfo puzzle = m_database->puzzleById(puzzleId);
-    if (puzzle.templateId <= 0) {
+    if (puzzle.templateId > 0) {
+        const QString contour = m_database->maskTemplateContour(puzzle.templateId);
+        if (!contour.isEmpty()) {
+            MaskLayer layer;
+            layer.number = 1;
+            layer.contour = contour;
+            layers.append(layer);
+        }
+    }
+
+    return layers;
+}
+
+QImage PuzzleImageProvider::loadHiddenPuzzleImage(int puzzleId, const QVector<int> &revealedMaskNumbers) const
+{
+    const QVector<MaskLayer> layers = maskLayersForPuzzle(puzzleId);
+    if (layers.isEmpty()) {
         return loadPuzzleImage(puzzleId, 0);
     }
 
-    const QString contour = m_database->maskTemplateContour(puzzle.templateId);
-    if (contour.isEmpty()) {
-        return loadPuzzleImage(puzzleId, 0);
+    QString cacheKey = QStringLiteral("%1:").arg(puzzleId);
+    for (const MaskLayer &layer : layers) {
+        cacheKey += QString::number(layer.number) + QLatin1Char('|') + QString::number(qHash(layer.contour)) + QLatin1Char(';');
+    }
+    cacheKey += QStringLiteral("r:");
+    for (int number : revealedMaskNumbers) {
+        cacheKey += QString::number(number) + QLatin1Char(',');
     }
 
-    const QString cacheKey = QStringLiteral("%1:%2").arg(puzzleId).arg(QString::number(qHash(contour)));
     {
         QMutexLocker locker(&m_cacheMutex);
         const auto it = m_hiddenCache.constFind(cacheKey);
@@ -114,7 +162,7 @@ QImage PuzzleImageProvider::loadHiddenPuzzleImage(int puzzleId) const
         return image;
     }
 
-    const QImage hidden = m_imageProcessor->applyHideMask(image, contour);
+    const QImage hidden = m_imageProcessor->applyHideMasks(image, layers, revealedMaskNumbers);
     if (!hidden.isNull()) {
         QMutexLocker locker(&m_cacheMutex);
         m_hiddenCache.insert(cacheKey, hidden);

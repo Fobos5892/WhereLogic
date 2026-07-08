@@ -7,6 +7,8 @@ Flipable {
     property bool faceUp: false
     property string label: ""
     property int cardIndex: 0
+    property bool hideAnswer: false
+    property bool answerRevealed: false
 
     width: 140
     height: 180
@@ -61,13 +63,24 @@ Flipable {
             id: cardImage
             anchors.fill: parent
             anchors.margins: 8
-            visible: status === Image.Ready && source.length > 0
             source: gameViewModel.currentPuzzleId > 0
-                    ? gameViewModel.puzzleDisplayImageUrl(flip.cardIndex)
+                    ? (flip.cardIndex === 0
+                       ? gameViewModel.puzzleSlot0DisplayUrl
+                       : gameViewModel.puzzleImageUrl(flip.cardIndex))
                     : ""
             fillMode: Image.PreserveAspectFit
             cache: false
-            opacity: status === Image.Loading ? 0.35 : 1
+            opacity: flip.hideAnswer
+                     ? (flip.answerRevealed ? (status === Image.Loading ? 0.35 : 1) : 0)
+                     : ((status === Image.Ready && source.length > 0)
+                        ? (status === Image.Loading ? 0.35 : 1)
+                        : 0)
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: Theme.animNormal * 1.5
+                    easing.type: Easing.InOutCubic
+                }
+            }
         }
 
         Image {
@@ -76,6 +89,7 @@ Flipable {
             width: 40
             height: 40
             visible: cardImage.status === Image.Loading
+                     && (flip.hideAnswer ? flip.answerRevealed : !flip.hideAnswer)
             source: "qrc:/qml/assets/spinner.svg"
             fillMode: Image.PreserveAspectFit
             transformOrigin: Item.Center
@@ -89,9 +103,32 @@ Flipable {
         }
 
         Text {
+            id: hiddenAnswerMark
             anchors.centerIn: parent
             width: parent.width - 16
-            visible: cardImage.status !== Image.Ready && cardImage.status !== Image.Loading
+            visible: flip.hideAnswer
+                     && (!flip.answerRevealed
+                         || opacity > 0.01)
+            text: "?"
+            color: Theme.primary
+            font.pixelSize: Theme.fontSizeHero
+            font.bold: true
+            horizontalAlignment: Text.AlignHCenter
+            opacity: flip.hideAnswer ? (flip.answerRevealed ? 0 : 1) : 0
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: Theme.animNormal * 1.5
+                    easing.type: Easing.InOutCubic
+                }
+            }
+        }
+
+        Text {
+            anchors.centerIn: parent
+            width: parent.width - 16
+            visible: !flip.hideAnswer
+                     && cardImage.status !== Image.Ready
+                     && cardImage.status !== Image.Loading
             text: flip.label || gameViewModel.label("ui.card.default_format").arg(flip.cardIndex + 1)
             color: Theme.textOnAccent
             font.pixelSize: Theme.fontSizeCaption

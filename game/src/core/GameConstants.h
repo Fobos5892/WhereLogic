@@ -17,7 +17,7 @@ constexpr int PIN_LENGTH = 5;
 constexpr int STEAL_MIN_SECONDS = 15;
 constexpr double CRITICAL_TIMER_THRESHOLD_SECONDS = 10.0;
 constexpr int MAX_ROUND_STARS = 5;
-constexpr int MAX_PUZZLES_PER_ROUND = 5;
+constexpr int MAX_PUZZLES_PER_ROUND = 10;
 
 // Teams
 inline const QString TEAM_A = QStringLiteral("Team_A");

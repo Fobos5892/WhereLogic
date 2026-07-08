@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 import ".."
 import "../components"
 
@@ -88,11 +89,17 @@ Rectangle {
         ScrollBar.vertical: ThemedScrollBar {
             policy: ScrollBar.AsNeeded
         }
+        leftPadding: Theme.spacing * 0.35
         rightPadding: Theme.spacing * 0.35
+
+        EditorAutoSaveScope {
+            width: editorScroll.availableWidth - editorScroll.leftPadding - editorScroll.rightPadding
+            implicitHeight: scrollContent.height
+            onSave: adminViewModel.autosaveEditorDraft()
 
         Column {
             id: scrollContent
-            width: editorScroll.availableWidth - editorScroll.leftPadding - editorScroll.rightPadding
+            width: parent.width
             spacing: Theme.spacing * 1.65
 
             NeonPanel {
@@ -118,14 +125,30 @@ Rectangle {
                         font.pixelSize: Theme.fontSizeCaption
                     }
 
-                    GameTextField {
+                    RowLayout {
                         width: parent.width
-                        fillWidth: true
-                        trailingAction: true
-                        placeholderText: adminViewModel.label("ui.editor.preset_name")
-                        text: adminViewModel.editPresetName
-                        onTextEdited: function(t) { adminViewModel.editPresetName = t }
-                        onTrailingActionClicked: adminViewModel.createPreset()
+                        height: Theme.buttonHeight
+                        spacing: Theme.spacing * 0.35
+
+                        SettingsTextField {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            fillWidth: false
+                            trailingAction: false
+                            placeholderText: adminViewModel.label("ui.editor.preset_name")
+                            text: adminViewModel.editPresetName
+                            onTextEdited: function(t) { adminViewModel.editPresetName = t }
+                        }
+
+                        IconButton {
+                            Layout.preferredWidth: Theme.chromeSize
+                            Layout.preferredHeight: Theme.chromeSize
+                            Layout.alignment: Qt.AlignVCenter
+                            z: 2
+                            iconSource: "qrc:/qml/assets/icon-add.svg"
+                            outline: true
+                            onClicked: adminViewModel.createPreset()
+                        }
                     }
 
                     Item {
@@ -154,64 +177,69 @@ Rectangle {
                     Repeater {
                         model: adminViewModel.presets
 
-                        Item {
+                        RowLayout {
                             width: parent.width
                             height: Theme.buttonHeight
+                            spacing: Theme.spacing * 0.35
 
                             readonly property bool presetSelected:
                                 adminViewModel.selectedPresetId === modelData.id
 
-                            Rectangle {
-                                anchors.fill: parent
-                                radius: Theme.radius
-                                color: presetSelected
-                                       ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.12)
-                                       : Qt.rgba(Theme.surfaceAlt.r, Theme.surfaceAlt.g, Theme.surfaceAlt.b, 0.38)
-                                border.width: 1
-                                border.color: presetSelected
-                                          ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.55)
-                                          : Qt.rgba(Theme.textSecondary.r, Theme.textSecondary.g, Theme.textSecondary.b, 0.16)
-                            }
+                            Item {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                Layout.minimumWidth: 0
+                                clip: true
 
-                            Rectangle {
-                                visible: presetSelected
-                                width: 3
-                                anchors.left: parent.left
-                                anchors.top: parent.top
-                                anchors.bottom: parent.bottom
-                                anchors.margins: Theme.spacing * 0.45
-                                radius: 2
-                                color: Theme.primary
-                            }
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: Theme.radius
+                                    color: presetSelected
+                                           ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.12)
+                                           : Qt.rgba(Theme.surfaceAlt.r, Theme.surfaceAlt.g, Theme.surfaceAlt.b, 0.38)
+                                    border.width: 1
+                                    border.color: presetSelected
+                                              ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.55)
+                                              : Qt.rgba(Theme.textSecondary.r, Theme.textSecondary.g, Theme.textSecondary.b, 0.16)
+                                }
 
-                            Text {
-                                anchors.left: parent.left
-                                anchors.right: trashBtn.left
-                                anchors.leftMargin: Theme.spacing
-                                anchors.rightMargin: Theme.spacing * 0.75
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: modelData.name
-                                color: presetSelected ? Theme.primary : Theme.textPrimary
-                                font.bold: presetSelected
-                                font.pixelSize: Theme.fontSizeBody
-                                elide: Text.ElideRight
+                                Rectangle {
+                                    visible: presetSelected
+                                    width: 3
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    anchors.margins: Theme.spacing * 0.45
+                                    radius: 2
+                                    color: Theme.primary
+                                }
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.leftMargin: Theme.spacing
+                                    anchors.rightMargin: Theme.spacing * 0.5
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.name
+                                    color: presetSelected ? Theme.primary : Theme.textPrimary
+                                    font.bold: presetSelected
+                                    font.pixelSize: Theme.fontSizeBody
+                                    elide: Text.ElideRight
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: adminViewModel.selectedPresetId = modelData.id
+                                }
                             }
 
                             TrashButton {
-                                id: trashBtn
-                                anchors.right: parent.right
-                                anchors.rightMargin: Theme.spacing * 0.35
-                                anchors.verticalCenter: parent.verticalCenter
-                                height: parent.height - Theme.spacing * 0.6
-                                width: height
+                                Layout.preferredWidth: Theme.chromeSize
+                                Layout.preferredHeight: Theme.chromeSize
+                                Layout.alignment: Qt.AlignVCenter
+                                z: 2
                                 onClicked: adminViewModel.deletePreset(modelData.id)
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                anchors.rightMargin: trashBtn.width + Theme.spacing
-                                hoverEnabled: true
-                                onClicked: adminViewModel.selectedPresetId = modelData.id
                             }
                         }
                     }
@@ -252,9 +280,13 @@ Rectangle {
                     Repeater {
                         model: adminViewModel.catalogRounds
 
-                        Item {
+                        RowLayout {
                             width: parent.width
-                            height: Math.max(Theme.buttonHeight, roundTitle.implicitHeight + Theme.spacing * 0.6)
+                            readonly property bool hasRule: modelData.rule && modelData.rule.length > 0
+                            height: hasRule
+                                    ? Theme.buttonHeight + Theme.fontSizeCaption + Theme.spacing * 0.35
+                                    : Theme.buttonHeight
+                            spacing: Theme.spacing * 0.35
 
                             readonly property int roundId: modelData.id
                             readonly property real rowPad: Theme.spacing * 0.65
@@ -268,62 +300,78 @@ Rectangle {
                                 return false
                             }
 
-                            Rectangle {
-                                anchors.fill: parent
-                                radius: Theme.radius
-                                color: Qt.rgba(Theme.surfaceAlt.r, Theme.surfaceAlt.g, Theme.surfaceAlt.b, roundEnabled ? 0.34 : 0.22)
-                                border.width: 1
-                                border.color: Qt.rgba(Theme.secondary.r, Theme.secondary.g, Theme.secondary.b, 0.25)
-                            }
+                            Item {
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                Layout.minimumWidth: 0
+                                clip: true
 
-                            DataStatusIcon {
-                                id: statusIcon
-                                width: roundEnabled ? Theme.iconLg : 0
-                                height: Theme.iconLg
-                                anchors.left: parent.left
-                                anchors.leftMargin: rowPad
-                                anchors.verticalCenter: parent.verticalCenter
-                                visible: roundEnabled
-                                status: modelData.dataStatus !== undefined
-                                        ? modelData.dataStatus
-                                        : adminViewModel.roundTemplateStatus(roundId)
-                            }
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: Theme.radius
+                                    color: Qt.rgba(Theme.surfaceAlt.r, Theme.surfaceAlt.g, Theme.surfaceAlt.b, roundEnabled ? 0.34 : 0.22)
+                                    border.width: 1
+                                    border.color: Qt.rgba(Theme.secondary.r, Theme.secondary.g, Theme.secondary.b, 0.25)
+                                }
 
-                            GameCheckBox {
-                                id: roundCheck
-                                anchors.left: statusIcon.right
-                                anchors.leftMargin: roundEnabled ? Theme.spacing * 0.45 : rowPad
-                                anchors.verticalCenter: parent.verticalCenter
-                                checked: roundEnabled
-                                onToggled: function(on) {
-                                    adminViewModel.setRoundEnabled(roundId, on)
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: rowPad
+                                    anchors.rightMargin: Theme.spacing * 0.35
+                                    spacing: Theme.spacing * 0.45
+
+                                    DataStatusIcon {
+                                        Layout.preferredWidth: roundEnabled ? Theme.iconLg : 0
+                                        Layout.preferredHeight: Theme.iconLg
+                                        Layout.alignment: Qt.AlignVCenter
+                                        visible: roundEnabled
+                                        status: modelData.dataStatus !== undefined
+                                                ? modelData.dataStatus
+                                                : adminViewModel.roundTemplateStatus(roundId)
+                                    }
+
+                                    GameCheckBox {
+                                        Layout.alignment: Qt.AlignVCenter
+                                        checked: roundEnabled
+                                        onToggled: function(on) {
+                                            adminViewModel.setRoundEnabled(roundId, on)
+                                        }
+                                    }
+
+                                Column {
+                                    id: roundTitleRow
+                                    Layout.fillWidth: true
+                                    Layout.alignment: Qt.AlignVCenter
+                                    spacing: Theme.spacing * 0.2
+
+                                    Text {
+                                        width: parent.width
+                                        text: modelData.title
+                                        color: Theme.textPrimary
+                                        font.pixelSize: Theme.fontSizeBody
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Text {
+                                        width: parent.width
+                                        text: modelData.rule
+                                        color: Theme.textSecondary
+                                        font.pixelSize: Theme.fontSizeCaption
+                                        elide: Text.ElideRight
+                                        visible: text.length > 0
+                                    }
+                                }
                                 }
                             }
 
-                            GameButton {
-                                id: configureBtn
-                                anchors.right: parent.right
-                                anchors.rightMargin: rowPad
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: adminViewModel.label("ui.editor.configure_round")
-                                primary: false
+                            IconButton {
+                                Layout.preferredWidth: Theme.chromeSize
+                                Layout.preferredHeight: Theme.chromeSize
+                                Layout.alignment: Qt.AlignVCenter
+                                z: 2
+                                iconSource: "qrc:/qml/assets/icon-settings.svg"
                                 outline: true
-                                enabled: roundEnabled
-                                       && adminViewModel.selectedPresetId > 0
                                 onClicked: adminViewModel.openRoundConfig(roundId)
-                            }
-
-                            Text {
-                                id: roundTitle
-                                anchors.left: roundCheck.right
-                                anchors.right: configureBtn.left
-                                anchors.leftMargin: Theme.spacing * 0.5
-                                anchors.rightMargin: Theme.spacing
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: modelData.title
-                                color: Theme.textPrimary
-                                font.pixelSize: Theme.fontSizeBody
-                                wrapMode: Text.WordWrap
                             }
                         }
                     }
@@ -334,6 +382,7 @@ Rectangle {
                 width: 1
                 height: Theme.spacing
             }
+        }
         }
     }
 }

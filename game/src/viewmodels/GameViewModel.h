@@ -49,6 +49,13 @@ class GameViewModel : public QObject
     Q_PROPERTY(int currentPresetId READ currentPresetId NOTIFY currentPresetIdChanged)
     Q_PROPERTY(int currentPuzzleId READ currentPuzzleId NOTIFY currentPuzzleIdChanged)
     Q_PROPERTY(bool hasPuzzleMask READ hasPuzzleMask NOTIFY puzzleMaskChanged)
+    Q_PROPERTY(int revealedMaskCount READ revealedMaskCount NOTIFY revealedMasksChanged)
+    Q_PROPERTY(bool allMasksRevealed READ allMasksRevealed NOTIFY revealedMasksChanged)
+    Q_PROPERTY(QString puzzleSlot0DisplayUrl READ puzzleSlot0DisplayUrl NOTIFY revealedMasksChanged)
+    Q_PROPERTY(QStringList visibleHints READ visibleHints NOTIFY hintsChanged)
+    Q_PROPERTY(bool canRevealHint READ canRevealHint NOTIFY hintsChanged)
+    Q_PROPERTY(int remainingHints READ remainingHints NOTIFY hintsChanged)
+    Q_PROPERTY(QString hybridAnimationStyle READ hybridAnimationStyle NOTIFY hybridAnimationStyleChanged)
 
 public:
     explicit GameViewModel(DatabaseManager *database, QObject *parent = nullptr);
@@ -87,7 +94,14 @@ public:
     QStringList quoteSlots() const { return m_quoteSlots; }
     int currentPresetId() const { return m_presetId; }
     int currentPuzzleId() const { return m_state.puzzleId; }
-    bool hasPuzzleMask() const { return !m_puzzleMaskContour.isEmpty(); }
+    bool hasPuzzleMask() const { return !m_puzzleMasks.isEmpty(); }
+    int revealedMaskCount() const { return m_revealedMaskNumbers.size(); }
+    bool allMasksRevealed() const;
+    QString puzzleSlot0DisplayUrl() const { return puzzleDisplayImageUrl(0); }
+    QStringList visibleHints() const;
+    bool canRevealHint() const;
+    int remainingHints() const;
+    QString hybridAnimationStyle() const { return m_hybridAnimationStyle; }
 
     void setUserAnswer(const QString &answer);
 
@@ -107,6 +121,7 @@ public:
     Q_INVOKABLE void rejectAll();
     Q_INVOKABLE void finishMissingReveal();
     Q_INVOKABLE void advanceAfterRound();
+    Q_INVOKABLE void revealNextHint();
 
     Q_INVOKABLE QString label(const QString &key) const;
 
@@ -142,6 +157,9 @@ signals:
     void currentPresetIdChanged();
     void currentPuzzleIdChanged();
     void puzzleMaskChanged();
+    void revealedMasksChanged();
+    void hintsChanged();
+    void hybridAnimationStyleChanged();
     void gameFinished();
 
 private:
@@ -163,6 +181,15 @@ private:
     void enterResolution();
     void awardPointToActiveTeam();
     void advancePuzzleOrRound();
+    void buildAnswerGroups();
+    bool allMaskGroupsRevealed() const;
+    int findAnswerGroupIndex(const QString &answer) const;
+    bool isGroupRevealed(int groupIndex) const;
+    void revealAnswerGroup(int groupIndex);
+    void parsePackedHints(const QString &packedHint);
+    void updateHintUnlockState();
+    QString formatRevealDetail(int groupIndex) const;
+    QString hiddenImageUrlSuffix() const;
     QString normalizeAnswer(const QString &answer) const;
     QString activeTeamIdLabel() const;
 
@@ -194,8 +221,21 @@ private:
     QString m_revealedAnswer;
     QString m_hintText;
     QString m_correctAnswer;
-    QString m_puzzleMaskContour;
+    QVector<PuzzleMaskInfo> m_puzzleMasks;
+    QList<int> m_revealedMaskNumbers;
+
+    struct MaskAnswerGroup {
+        QString answerText;
+        QList<int> maskNumbers;
+    };
+    QVector<MaskAnswerGroup> m_answerGroups;
+    int m_lastRevealedGroupIndex = -1;
+
     QStringList m_quoteSlots;
+    QStringList m_puzzleHints;
+    QString m_hybridAnimationStyle = QStringLiteral("soft");
+    int m_revealedHints = 0;
+    bool m_hintUnlockReady = false;
 
     int m_puzzleNumber = 0;
     int m_timerSeconds = 0;

@@ -55,18 +55,6 @@ Item {
                 wrapMode: Text.WordWrap
                 visible: gameViewModel.ruleText.length > 0
             }
-
-            Text {
-                width: parent.width
-                text: gameViewModel.hintText.length > 0
-                      ? gameViewModel.label("ui.game.hint_format").arg(gameViewModel.hintText)
-                      : ""
-                color: Theme.primary
-                font.pixelSize: Theme.fontSizeCaption
-                font.italic: true
-                wrapMode: Text.WordWrap
-                visible: gameViewModel.hintText.length > 0 && gameViewModel.cardsFaceUp
-            }
         }
     }
 

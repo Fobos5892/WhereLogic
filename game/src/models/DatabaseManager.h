@@ -43,6 +43,14 @@ struct MaskTemplateInfo {
     QString contourPoints;
 };
 
+struct PuzzleMaskInfo {
+    int id = 0;
+    int puzzleId = 0;
+    int sortOrder = 0;
+    QString answerText;
+    QString contourPoints;
+};
+
 struct TeamInfo {
     int id = 0;
     QString name;
@@ -88,6 +96,8 @@ public:
     bool setPresetRounds(int presetId, const QVector<int> &roundIdsInOrder);
 
     int createPuzzle(int roundId, const QString &answer, const QString &hintText);
+    bool ensurePuzzleTemplates(int roundId, int targetCount);
+    bool normalizePuzzleSortOrder(int roundId);
     bool updatePuzzle(int puzzleId,
                        const QString &answer,
                        const QString &hintText,
@@ -105,6 +115,9 @@ public:
     MaskTemplateInfo maskTemplateById(int templateId) const;
     QByteArray maskTemplateImageData(int templateId) const;
     QString maskTemplateContour(int templateId) const;
+
+    QVector<PuzzleMaskInfo> listPuzzleMasks(int puzzleId) const;
+    bool replacePuzzleMasks(int puzzleId, const QVector<PuzzleMaskInfo> &masks);
 
     RoundInfo roundById(int roundId) const;
     PuzzleInfo puzzleById(int puzzleId) const;
@@ -126,6 +139,8 @@ private:
     bool openDatabase();
     bool createSchema();
     bool executeSchemaStatements();
+    bool migrateLegacyMaskTemplates();
+    bool migrateRoundCatalogLayouts();
     bool seedLanguagesAndStrings();
     bool repairStoredTextEncoding();
     bool removeDuplicatePresets();
@@ -142,6 +157,7 @@ private:
                             const QString &hintKey,
                             const QString &quoteSlotsJson = {},
                             const QString &correctOrder = {});
+    bool clearDefaultPuzzlePlaceholders(int roundId);
 
     QSqlDatabase database() const;
     bool execQuery(const QString &sql, const QVariantList &bindValues = {}) const;

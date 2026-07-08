@@ -8,11 +8,34 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QHash>
 #include <QRegularExpression>
+
+#include <algorithm>
 
 namespace {
 
 constexpr int kTimerTickMs = 100;
+const QString kHintDelimiter = QStringLiteral("||");
+const QLatin1String kHybridAnimPrefix("__hybrid_anim:");
+
+QString parseHybridAnimStyle(const QString &correctOrderJson)
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(correctOrderJson.toUtf8());
+    if (!doc.isArray()) {
+        return QStringLiteral("soft");
+    }
+    for (const QJsonValue &value : doc.array()) {
+        const QString token = value.toString().trimmed();
+        if (!token.startsWith(kHybridAnimPrefix)) {
+            continue;
+        }
+        const QString raw = token.mid(kHybridAnimPrefix.size()).trimmed().toLower();
+        return raw == QStringLiteral("aggressive") ? QStringLiteral("aggressive")
+                                                   : QStringLiteral("soft");
+    }
+    return QStringLiteral("soft");
+}
 
 } // namespace
 
@@ -85,17 +108,175 @@ QString GameViewModel::puzzleImageUrl(int slotIndex) const
 
 QString GameViewModel::puzzleHiddenImageUrl() const
 {
-    if (m_state.puzzleId <= 0 || m_puzzleMaskContour.isEmpty()) {
+    if (m_state.puzzleId <= 0 || m_puzzleMasks.isEmpty()) {
         return {};
     }
-    return QStringLiteral("image://puzzle/%1/hide").arg(m_state.puzzleId);
+    const QString suffix = hiddenImageUrlSuffix();
+    if (suffix.isEmpty()) {
+        return QStringLiteral("image://puzzle/%1/hide").arg(m_state.puzzleId);
+    }
+    return QStringLiteral("image://puzzle/%1/hide/%2").arg(m_state.puzzleId).arg(suffix);
+}
+
+QString GameViewModel::hiddenImageUrlSuffix() const
+{
+    if (m_revealedMaskNumbers.isEmpty()) {
+        return {};
+    }
+    QList<int> numbers = m_revealedMaskNumbers;
+    std::sort(numbers.begin(), numbers.end());
+    QStringList parts;
+    parts.reserve(numbers.size());
+    for (int number : numbers) {
+        parts.append(QString::number(number));
+    }
+    return parts.join(QLatin1Char(','));
+}
+
+QStringList GameViewModel::visibleHints() const
+{
+    const int count = std::clamp(m_revealedHints, 0, static_cast<int>(m_puzzleHints.size()));
+    return m_puzzleHints.mid(0, count);
+}
+
+bool GameViewModel::canRevealHint() const
+{
+    const bool gameplayStage = m_stage == GameConstants::Stage::MainTurn
+                               || m_stage == GameConstants::Stage::StealTurn;
+    return gameplayStage && m_cardsFaceUp && m_hintUnlockReady && remainingHints() > 0;
+}
+
+int GameViewModel::remainingHints() const
+{
+    return std::max(0, static_cast<int>(m_puzzleHints.size()) - m_revealedHints);
+}
+
+void GameViewModel::parsePackedHints(const QString &packedHint)
+{
+    m_puzzleHints.clear();
+    const QStringList parts = packedHint.split(kHintDelimiter, Qt::SkipEmptyParts);
+    for (const QString &part : parts) {
+        const QString trimmed = part.trimmed();
+        if (!trimmed.isEmpty()) {
+            m_puzzleHints.append(trimmed);
+        }
+    }
+    while (m_puzzleHints.size() > 3) {
+        m_puzzleHints.removeLast();
+    }
+    m_hintText = m_puzzleHints.isEmpty() ? QString() : m_puzzleHints.first();
+}
+
+void GameViewModel::updateHintUnlockState()
+{
+    const int initialSeconds = m_isStealTurn ? m_stealTimerSeconds : m_baseTimerSeconds;
+    const int elapsed = std::max(0, initialSeconds - m_timerSeconds);
+    const bool unlock = elapsed >= 30;
+    if (m_hintUnlockReady == unlock) {
+        return;
+    }
+    m_hintUnlockReady = unlock;
+    emit hintsChanged();
+}
+
+bool GameViewModel::allMasksRevealed() const
+{
+    return allMaskGroupsRevealed();
+}
+
+bool GameViewModel::allMaskGroupsRevealed() const
+{
+    if (m_puzzleMasks.isEmpty()) {
+        return false;
+    }
+    for (int i = 0; i < m_answerGroups.size(); ++i) {
+        if (!isGroupRevealed(i)) {
+            return false;
+        }
+    }
+    return !m_answerGroups.isEmpty();
+}
+
+void GameViewModel::buildAnswerGroups()
+{
+    m_answerGroups.clear();
+    QHash<QString, int> indexByKey;
+    for (const PuzzleMaskInfo &mask : m_puzzleMasks) {
+        const QString key = normalizeAnswer(mask.answerText);
+        if (key.isEmpty()) {
+            continue;
+        }
+        if (!indexByKey.contains(key)) {
+            MaskAnswerGroup group;
+            group.answerText = mask.answerText.trimmed();
+            m_answerGroups.append(group);
+            indexByKey.insert(key, m_answerGroups.size() - 1);
+        }
+        m_answerGroups[indexByKey.value(key)].maskNumbers.append(mask.sortOrder);
+    }
+
+    for (MaskAnswerGroup &group : m_answerGroups) {
+        std::sort(group.maskNumbers.begin(), group.maskNumbers.end());
+    }
+}
+
+int GameViewModel::findAnswerGroupIndex(const QString &answer) const
+{
+    const QString key = normalizeAnswer(answer);
+    for (int i = 0; i < m_answerGroups.size(); ++i) {
+        if (normalizeAnswer(m_answerGroups.at(i).answerText) == key) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool GameViewModel::isGroupRevealed(int groupIndex) const
+{
+    if (groupIndex < 0 || groupIndex >= m_answerGroups.size()) {
+        return false;
+    }
+    for (int number : m_answerGroups.at(groupIndex).maskNumbers) {
+        if (!m_revealedMaskNumbers.contains(number)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void GameViewModel::revealAnswerGroup(int groupIndex)
+{
+    if (groupIndex < 0 || groupIndex >= m_answerGroups.size()) {
+        return;
+    }
+    for (int number : m_answerGroups.at(groupIndex).maskNumbers) {
+        if (!m_revealedMaskNumbers.contains(number)) {
+            m_revealedMaskNumbers.append(number);
+        }
+    }
+    m_lastRevealedGroupIndex = groupIndex;
+    emit revealedMasksChanged();
+}
+
+QString GameViewModel::formatRevealDetail(int groupIndex) const
+{
+    if (groupIndex < 0 || groupIndex >= m_answerGroups.size()) {
+        return m_correctAnswer;
+    }
+    const MaskAnswerGroup &group = m_answerGroups.at(groupIndex);
+    QStringList parts;
+    parts.reserve(group.maskNumbers.size());
+    for (int number : group.maskNumbers) {
+        parts.append(QString::number(number));
+    }
+    return QStringLiteral("%1 (%2)").arg(group.answerText, parts.join(QStringLiteral(", ")));
 }
 
 QString GameViewModel::puzzleDisplayImageUrl(int slotIndex) const
 {
     if (m_layoutType == GameConstants::LayoutType::FullMask
         && slotIndex == 0
-        && !m_puzzleMaskContour.isEmpty()) {
+        && !m_puzzleMasks.isEmpty()) {
         return puzzleHiddenImageUrl();
     }
     return puzzleImageUrl(slotIndex);
@@ -277,6 +458,18 @@ void GameViewModel::submitAnswer(const QString &text)
     evaluateAnswer(m_submittedAnswer);
 }
 
+void GameViewModel::revealNextHint()
+{
+    if (!canRevealHint()) {
+        return;
+    }
+    if (m_revealedHints >= m_puzzleHints.size()) {
+        return;
+    }
+    ++m_revealedHints;
+    emit hintsChanged();
+}
+
 void GameViewModel::transferTurn()
 {
     if (m_isStealTurn) {
@@ -331,6 +524,17 @@ void GameViewModel::finishMissingReveal()
     }
 
     if (m_answerWasCorrect) {
+        if (m_layoutType == GameConstants::LayoutType::FullMask
+            && !m_answerGroups.isEmpty()
+            && !allMaskGroupsRevealed()) {
+            setStage(GameConstants::Stage::MainTurn);
+            m_cardsFaceUp = true;
+            emit cardsFaceUpChanged(true);
+            startMainTimer();
+            persistState();
+            return;
+        }
+
         awardPointToActiveTeam();
         advancePuzzleOrRound();
         return;
@@ -437,7 +641,6 @@ void GameViewModel::onRemoteConnectedChanged(bool connected)
 void GameViewModel::loadPersistedState()
 {
     m_state = m_database->loadGameState();
-    m_hasActiveSession = m_state.activeSession;
     m_presetId = m_state.presetId;
     m_roundScoreTeamA = m_state.roundScoreTeamA;
     m_roundScoreTeamB = m_state.roundScoreTeamB;
@@ -450,6 +653,18 @@ void GameViewModel::loadPersistedState()
         m_teamBName = teams.at(1).name;
         m_totalScoreTeamA = teams.at(0).score;
         m_totalScoreTeamB = teams.at(1).score;
+    }
+
+    const bool hasPreset = m_presetId > 0;
+    const bool hasRounds = hasPreset && !m_database->listRoundsForPreset(m_presetId).isEmpty();
+    const bool hasTeams = teams.size() >= 2;
+    m_hasActiveSession = m_state.activeSession && hasPreset && hasRounds && hasTeams;
+    if (!m_hasActiveSession) {
+        m_presetId = 0;
+        m_state = GameStateSnapshot();
+        m_state.stage = GameConstants::Stage::Welcome;
+        m_state.subState = GameConstants::SubState::AwaitingReady;
+        m_database->saveGameState(m_state);
     }
 
     setStage(GameConstants::Stage::Welcome);
@@ -545,14 +760,27 @@ void GameViewModel::loadCurrentPuzzle()
     const PuzzleInfo puzzle = m_currentPuzzles.at(m_puzzleIndex);
     m_puzzleNumber = puzzle.sortOrder;
     m_correctAnswer = puzzle.correctAnswer;
-    m_hintText = m_database->localizedString(puzzle.hintTextKey);
+    parsePackedHints(m_database->localizedString(puzzle.hintTextKey));
     m_state.puzzleId = puzzle.id;
 
-    m_puzzleMaskContour.clear();
-    if (puzzle.templateId > 0) {
-        m_puzzleMaskContour = m_database->maskTemplateContour(puzzle.templateId);
+    m_puzzleMasks.clear();
+    m_revealedMaskNumbers.clear();
+    m_answerGroups.clear();
+    m_lastRevealedGroupIndex = -1;
+    m_puzzleMasks = m_database->listPuzzleMasks(puzzle.id);
+    if (m_puzzleMasks.isEmpty() && puzzle.templateId > 0) {
+        const QString contour = m_database->maskTemplateContour(puzzle.templateId);
+        if (!contour.isEmpty()) {
+            PuzzleMaskInfo legacy;
+            legacy.sortOrder = 1;
+            legacy.answerText = puzzle.correctAnswer;
+            legacy.contourPoints = contour;
+            m_puzzleMasks.append(legacy);
+        }
     }
+    buildAnswerGroups();
     emit puzzleMaskChanged();
+    emit revealedMasksChanged();
 
     m_quoteSlots.clear();
     if (!puzzle.quoteSlotsJson.isEmpty()) {
@@ -563,9 +791,16 @@ void GameViewModel::loadCurrentPuzzle()
     }
     emit quoteSlotsChanged();
 
+    const QString nextHybridStyle = parseHybridAnimStyle(puzzle.correctOrder);
+    if (m_hybridAnimationStyle != nextHybridStyle) {
+        m_hybridAnimationStyle = nextHybridStyle;
+        emit hybridAnimationStyleChanged();
+    }
+
     resetPuzzlePresentation();
     emit puzzleNumberChanged();
     emit hintTextChanged();
+    emit hintsChanged();
     emit currentPuzzleIdChanged();
 }
 
@@ -576,6 +811,10 @@ void GameViewModel::resetPuzzlePresentation()
     m_submittedAnswer.clear();
     m_missingRevealText.clear();
     m_revealedAnswer.clear();
+    m_revealedMaskNumbers.clear();
+    m_lastRevealedGroupIndex = -1;
+    m_revealedHints = 0;
+    m_hintUnlockReady = false;
     m_answerWasCorrect = false;
     m_isCorrectFlash = false;
     m_isWrongFlash = false;
@@ -583,6 +822,8 @@ void GameViewModel::resetPuzzlePresentation()
     emit submittedAnswerChanged();
     emit missingRevealTextChanged();
     emit revealedAnswerChanged();
+    emit revealedMasksChanged();
+    emit hintsChanged();
     emit answerWasCorrectChanged();
     emit evaluationFlashChanged();
 }
@@ -593,6 +834,7 @@ void GameViewModel::startMainTimer()
     m_timerSeconds = m_baseTimerSeconds;
     m_timerMilliseconds = 0;
     emit timerChanged();
+    updateHintUnlockState();
     m_gameTimer.start();
 }
 
@@ -601,6 +843,7 @@ void GameViewModel::startStealTimer()
     m_timerSeconds = m_stealTimerSeconds;
     m_timerMilliseconds = 0;
     emit timerChanged();
+    updateHintUnlockState();
     m_gameTimer.start();
 }
 
@@ -626,16 +869,29 @@ void GameViewModel::onTimerTick()
     }
 
     emit timerChanged();
+    updateHintUnlockState();
 }
 
 void GameViewModel::evaluateAnswer(const QString &answer)
 {
     setStage(GameConstants::Stage::Evaluating);
-    const bool correct = normalizeAnswer(answer) == normalizeAnswer(m_correctAnswer);
+
+    bool correct = false;
+    int matchedGroupIndex = -1;
+    if (m_layoutType == GameConstants::LayoutType::FullMask && !m_answerGroups.isEmpty()) {
+        matchedGroupIndex = findAnswerGroupIndex(answer);
+        correct = matchedGroupIndex >= 0 && !isGroupRevealed(matchedGroupIndex);
+    } else {
+        correct = normalizeAnswer(answer) == normalizeAnswer(m_correctAnswer);
+    }
+
     m_answerWasCorrect = correct;
     emit answerWasCorrectChanged();
 
     if (correct) {
+        if (m_layoutType == GameConstants::LayoutType::FullMask && matchedGroupIndex >= 0) {
+            revealAnswerGroup(matchedGroupIndex);
+        }
         m_isCorrectFlash = true;
         emit evaluationFlashChanged();
         m_flashTimer.start();
@@ -648,6 +904,16 @@ void GameViewModel::evaluateAnswer(const QString &answer)
     m_flashTimer.start();
 
     if (RoundRevealPolicy::requiresMissingReveal(m_layoutType)) {
+        if (m_layoutType == GameConstants::LayoutType::FullMask && !m_answerGroups.isEmpty()) {
+            for (int i = 0; i < m_answerGroups.size(); ++i) {
+                if (!isGroupRevealed(i)) {
+                    revealAnswerGroup(i);
+                    m_lastRevealedGroupIndex = i;
+                    break;
+                }
+            }
+            emit revealedMasksChanged();
+        }
         enterMissingReveal(false);
         return;
     }
@@ -661,7 +927,11 @@ void GameViewModel::evaluateAnswer(const QString &answer)
 
 void GameViewModel::enterMissingReveal(bool /*wasCorrect*/)
 {
-    m_missingRevealText = RoundRevealPolicy::formatMissingRevealText(m_layoutType, m_correctAnswer);
+    QString detail = m_correctAnswer;
+    if (m_layoutType == GameConstants::LayoutType::FullMask && m_lastRevealedGroupIndex >= 0) {
+        detail = formatRevealDetail(m_lastRevealedGroupIndex);
+    }
+    m_missingRevealText = RoundRevealPolicy::formatMissingRevealText(m_layoutType, detail);
     emit missingRevealTextChanged();
     setStage(GameConstants::Stage::MissingReveal);
     persistState();

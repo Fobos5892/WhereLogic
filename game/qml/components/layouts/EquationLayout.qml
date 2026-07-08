@@ -6,28 +6,45 @@ import ".."
 RowLayout {
     spacing: Theme.spacing
 
-    Repeater {
-        model: 3
-        GameCard {
-            Layout.fillHeight: true
-            Layout.preferredWidth: 140
-            faceUp: gameViewModel.cardsFaceUp
-            cardIndex: index
-            label: String(index + 1)
-        }
+    GameCard {
+        Layout.fillHeight: true
+        Layout.preferredWidth: 140
+        faceUp: gameViewModel.cardsFaceUp
+        cardIndex: 0
+        label: gameViewModel.label("ui.layout.equation_operand").arg(1)
     }
 
-    Label {
+    Text {
         Layout.alignment: Qt.AlignVCenter
-        text: "="
+        text: "+"
         color: Theme.primary
         font.pixelSize: Theme.fontSizeHero
+        font.bold: true
     }
 
     GameCard {
         Layout.fillHeight: true
         Layout.preferredWidth: 140
         faceUp: gameViewModel.cardsFaceUp
-        label: "?"
+        cardIndex: 1
+        label: gameViewModel.label("ui.layout.equation_operand").arg(2)
+    }
+
+    Text {
+        Layout.alignment: Qt.AlignVCenter
+        text: "="
+        color: Theme.primary
+        font.pixelSize: Theme.fontSizeHero
+        font.bold: true
+    }
+
+    GameCard {
+        Layout.fillHeight: true
+        Layout.preferredWidth: 140
+        faceUp: gameViewModel.cardsFaceUp
+        cardIndex: 2
+        hideAnswer: true
+        answerRevealed: gameViewModel.currentStage === "STAGE_MISSING_REVEAL"
+                        || gameViewModel.currentStage === "STAGE_RESOLUTION"
     }
 }

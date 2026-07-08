@@ -7,18 +7,42 @@ Item {
     id: control
 
     property string placeholderText: ""
-    property alias text: field.text
+    property string text: ""
     property alias readOnly: field.readOnly
 
     property bool fillWidth: true
     property bool trailingAction: false
+    property bool autosaveOnFocusLost: false
 
     signal textEdited(string text)
     signal trailingActionClicked()
+    signal focusLost()
+
+    function nearestAutosaveScope() {
+        var node = control.parent
+        while (node) {
+            if (typeof node.requestSave === "function")
+                return node
+            node = node.parent
+        }
+        return null
+    }
+
+    function notifyAutosave() {
+        if (!control.autosaveOnFocusLost)
+            return
+        const scope = control.nearestAutosaveScope()
+        if (scope)
+            scope.requestSave()
+    }
 
     implicitWidth: 280
     implicitHeight: Theme.buttonHeight
-    width: fillWidth && parent ? parent.width : implicitWidth
+
+    onTextChanged: {
+        if (!field.activeFocus && field.text !== control.text)
+            field.text = control.text
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -44,8 +68,10 @@ Item {
             visible: control.trailingAction
             anchors.right: parent.right
             anchors.rightMargin: Theme.spacing * 0.35
-            anchors.verticalCenter: parent.verticalCenter
-            height: parent.height - Theme.spacing * 0.7
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.topMargin: Theme.spacing * 0.3
+            anchors.bottomMargin: Theme.spacing * 0.3
             width: height
 
             Rectangle {
@@ -60,8 +86,8 @@ Item {
 
             HiResImage {
                 anchors.centerIn: parent
-                width: Theme.iconSm
-                height: Theme.iconSm
+                width: Theme.iconMd
+                height: Theme.iconMd
                 source: "qrc:/qml/assets/icon-add.svg"
                 resolutionScale: 3
             }
@@ -87,7 +113,20 @@ Item {
             font.pixelSize: Theme.fontSizeBody
             clip: true
             selectByMouse: true
-            onTextChanged: control.textEdited(text)
+            onTextEdited: control.textEdited(text)
+            onActiveFocusChanged: {
+                if (!activeFocus) {
+                    control.focusLost()
+                    control.notifyAutosave()
+                }
+            }
+        }
+
+        Binding {
+            target: field
+            property: "text"
+            value: control.text
+            when: !field.activeFocus
         }
     }
 }

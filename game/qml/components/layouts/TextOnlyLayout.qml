@@ -10,7 +10,9 @@ Item {
         spacing: Theme.spacing
 
         Repeater {
-            model: Math.max(gameViewModel.quoteSlots.length, 3)
+            model: gameViewModel.quoteSlots.length > 0
+                   ? gameViewModel.quoteSlots.length
+                   : 3
             delegate: NeonPanel {
                 Layout.fillWidth: true
 

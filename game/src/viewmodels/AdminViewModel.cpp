@@ -1,5 +1,6 @@
 #include "AdminViewModel.h"
 
+#include "../core/GameConstants.h"
 #include "../models/DatabaseManager.h"
 #include "../models/ImageProcessor.h"
 #include "../models/PuzzleImageProvider.h"
@@ -7,11 +8,208 @@
 #include <QBuffer>
 #include <QFile>
 #include <QFutureWatcher>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QRegularExpression>
 #include <QVariantMap>
 #include <QtConcurrent>
+
+#include <algorithm>
+
+namespace {
+const QLatin1String kHybridAnimPrefix("__hybrid_anim:");
+
+QString normalizeHybridAnimStyleValue(const QString &style)
+{
+    const QString lowered = style.trimmed().toLower();
+    if (lowered == QStringLiteral("aggressive")) {
+        return QStringLiteral("aggressive");
+    }
+    return QStringLiteral("soft");
+}
+
+QString parseHybridAnimStyleFromCorrectOrder(const QString &correctOrderJson)
+{
+    if (correctOrderJson.isEmpty()) {
+        return QStringLiteral("soft");
+    }
+    const QJsonDocument doc = QJsonDocument::fromJson(correctOrderJson.toUtf8());
+    if (!doc.isArray()) {
+        return QStringLiteral("soft");
+    }
+    for (const QJsonValue &value : doc.array()) {
+        const QString token = value.toString().trimmed();
+        if (token.startsWith(kHybridAnimPrefix)) {
+            return normalizeHybridAnimStyleValue(token.mid(kHybridAnimPrefix.size()));
+        }
+    }
+    return QStringLiteral("soft");
+}
+} // namespace
+
+struct PuzzleSaveOutcome {
+    int puzzleId = 0;
+    bool success = false;
+    QString errorMessage;
+};
+
+QString AdminViewModel::maskContour() const
+{
+    if (m_editorMasks.isEmpty()) {
+        return {};
+    }
+    return m_editorMasks.last().contour;
+}
+
+QString AdminViewModel::normalizeAnswerKey(const QString &answer)
+{
+    return answer.trimmed().toLower();
+}
+
+QString AdminViewModel::formatGroupedAnswerLabel(const QString &answer, const QList<int> &maskNumbers)
+{
+    QList<int> numbers = maskNumbers;
+    std::sort(numbers.begin(), numbers.end());
+    QStringList parts;
+    parts.reserve(numbers.size());
+    for (int number : numbers) {
+        parts.append(QString::number(number));
+    }
+    return QStringLiteral("%1 (%2)").arg(answer.trimmed(), parts.join(QStringLiteral(", ")));
+}
+
+void AdminViewModel::regenerateGroupedAnswerOptions()
+{
+    if (!isPhotoMaskRound()) {
+        return;
+    }
+
+    QHash<QString, QString> displayByKey;
+    QHash<QString, QList<int>> numbersByKey;
+    for (const EditorMaskEntry &mask : m_editorMasks) {
+        const QString key = normalizeAnswerKey(mask.answer);
+        if (key.isEmpty()) {
+            continue;
+        }
+        if (!displayByKey.contains(key)) {
+            displayByKey.insert(key, mask.answer.trimmed());
+        }
+        numbersByKey[key].append(mask.number);
+    }
+
+    QStringList grouped;
+    grouped.reserve(displayByKey.size());
+    for (auto it = displayByKey.constBegin(); it != displayByKey.constEnd(); ++it) {
+        grouped.append(formatGroupedAnswerLabel(it.value(), numbersByKey.value(it.key())));
+    }
+    std::sort(grouped.begin(), grouped.end(), [](const QString &a, const QString &b) {
+        return a.localeAwareCompare(b) < 0;
+    });
+
+    m_answerOptions = grouped;
+    emit answerOptionsChanged();
+}
+
+void AdminViewModel::loadEditorMasks(int puzzleId)
+{
+    m_editorMasks.clear();
+    if (!m_database || puzzleId <= 0) {
+        emit masksChanged();
+        return;
+    }
+
+    const QVector<PuzzleMaskInfo> masks = m_database->listPuzzleMasks(puzzleId);
+    m_editorMasks.reserve(masks.size());
+    for (const PuzzleMaskInfo &mask : masks) {
+        EditorMaskEntry entry;
+        entry.number = mask.sortOrder;
+        entry.contour = mask.contourPoints;
+        entry.answer = mask.answerText;
+        m_editorMasks.append(entry);
+    }
+
+    if (m_editorMasks.isEmpty() && m_selectedTemplateId > 0) {
+        const QString contour = m_database->maskTemplateContour(m_selectedTemplateId);
+        if (!contour.isEmpty()) {
+            EditorMaskEntry entry;
+            entry.number = 1;
+            entry.contour = contour;
+            entry.answer = m_editAnswer;
+            m_editorMasks.append(entry);
+        }
+    }
+
+    emit masksChanged();
+}
+
+QVector<PuzzleMaskInfo> AdminViewModel::editorMasksForSave() const
+{
+    QVector<PuzzleMaskInfo> masks;
+    masks.reserve(m_editorMasks.size());
+    for (const EditorMaskEntry &entry : m_editorMasks) {
+        if (entry.contour.trimmed().isEmpty()) {
+            continue;
+        }
+        PuzzleMaskInfo mask;
+        mask.sortOrder = entry.number;
+        mask.answerText = entry.answer.trimmed();
+        mask.contourPoints = entry.contour;
+        masks.append(mask);
+    }
+    return masks;
+}
+
+int AdminViewModel::maskNumberAt(int index) const
+{
+    if (index < 0 || index >= m_editorMasks.size()) {
+        return 0;
+    }
+    return m_editorMasks.at(index).number;
+}
+
+QString AdminViewModel::maskContourAt(int index) const
+{
+    if (index < 0 || index >= m_editorMasks.size()) {
+        return {};
+    }
+    return m_editorMasks.at(index).contour;
+}
+
+QString AdminViewModel::maskAnswerAt(int index) const
+{
+    if (index < 0 || index >= m_editorMasks.size()) {
+        return {};
+    }
+    return m_editorMasks.at(index).answer;
+}
+
+void AdminViewModel::setMaskAnswerAt(int index, const QString &text)
+{
+    if (index < 0 || index >= m_editorMasks.size()) {
+        return;
+    }
+    if (m_editorMasks[index].answer == text) {
+        return;
+    }
+    m_editorMasks[index].answer = text;
+    regenerateGroupedAnswerOptions();
+    emit masksChanged();
+}
+
+void AdminViewModel::removeMaskAt(int index)
+{
+    if (index < 0 || index >= m_editorMasks.size()) {
+        return;
+    }
+    m_editorMasks.removeAt(index);
+    for (int i = 0; i < m_editorMasks.size(); ++i) {
+        m_editorMasks[i].number = i + 1;
+    }
+    regenerateGroupedAnswerOptions();
+    emit masksChanged();
+    refreshEditorPreview();
+}
 
 AdminViewModel::AdminViewModel(DatabaseManager *database, QObject *parent)
     : QObject(parent)
@@ -85,10 +283,16 @@ int AdminViewModel::imageSlotCountForLayout(const QString &layoutType)
         return 0;
     }
     if (layoutType == QStringLiteral("SINGLE_HYBRID")) {
-        return 1;
+        return 3;
     }
     if (layoutType == QStringLiteral("EQUATION")) {
         return 3;
+    }
+    if (layoutType == QStringLiteral("CHRONOLOGY")) {
+        return 4;
+    }
+    if (layoutType == QStringLiteral("BLITZ_STANDARD")) {
+        return 8;
     }
     return 4;
 }
@@ -97,9 +301,6 @@ int AdminViewModel::textSlotCountForLayout(const QString &layoutType)
 {
     if (layoutType == QStringLiteral("TEXT_ONLY")) {
         return 4;
-    }
-    if (layoutType == QStringLiteral("SINGLE_HYBRID")) {
-        return 1;
     }
     return 0;
 }
@@ -143,7 +344,7 @@ void AdminViewModel::loadImageSlot(int slotIndex)
     m_sourceImage = QImage();
     m_previewImage = QImage();
     m_pendingImageBytes.clear();
-    m_maskContour.clear();
+    m_editorMasks.clear();
 
     if (m_slotImageCache.contains(slotIndex)) {
         m_sourceImage = m_slotImageCache.value(slotIndex);
@@ -161,8 +362,21 @@ void AdminViewModel::loadImageSlot(int slotIndex)
         }
     }
 
-    if (slotIndex == 0 && m_selectedTemplateId > 0 && m_database) {
-        m_maskContour = m_database->maskTemplateContour(m_selectedTemplateId);
+    if (slotIndex == 0) {
+        if (m_selectedPuzzleId > 0) {
+            loadEditorMasks(m_selectedPuzzleId);
+        } else if (m_selectedTemplateId > 0 && m_database) {
+            m_editorMasks.clear();
+            const QString contour = m_database->maskTemplateContour(m_selectedTemplateId);
+            if (!contour.isEmpty()) {
+                EditorMaskEntry entry;
+                entry.number = 1;
+                entry.contour = contour;
+                entry.answer = m_editAnswer;
+                m_editorMasks.append(entry);
+            }
+            emit masksChanged();
+        }
     }
 
     if (m_sourceImage.isNull() && slotIndex == 0 && m_selectedTemplateId > 0 && m_database) {
@@ -172,10 +386,10 @@ void AdminViewModel::loadImageSlot(int slotIndex)
         }
     }
 
-    emit maskContourChanged();
     refreshEditorPreview();
     ++m_puzzleImageRevision;
     emit puzzleImageChanged();
+    notifySlotImagesChanged();
 }
 
 void AdminViewModel::refreshEditorPreview()
@@ -186,7 +400,7 @@ void AdminViewModel::refreshEditorPreview()
         return;
     }
 
-    const bool hide = isPhotoMaskRound() && m_selectedImageSlot == 0 && !m_maskContour.isEmpty()
+    const bool hide = isPhotoMaskRound() && m_selectedImageSlot == 0 && !m_editorMasks.isEmpty()
                       && m_imageProcessor;
     if (!hide) {
         m_previewImage = m_sourceImage;
@@ -196,7 +410,7 @@ void AdminViewModel::refreshEditorPreview()
 
     const int jobId = ++m_previewJobId;
     const QImage source = m_sourceImage;
-    const QString contour = m_maskContour;
+    const QVector<EditorMaskEntry> masks = m_editorMasks;
     ImageProcessor *processor = m_imageProcessor;
     setImageProcessingBusy(true);
 
@@ -210,11 +424,19 @@ void AdminViewModel::refreshEditorPreview()
         setImageProcessingBusy(false);
         watcher->deleteLater();
     });
-    watcher->setFuture(QtConcurrent::run([processor, source, contour]() -> QImage {
+    watcher->setFuture(QtConcurrent::run([processor, source, masks]() -> QImage {
         if (!processor) {
             return source;
         }
-        const QImage hidden = processor->applyHideMask(source, contour);
+        QVector<MaskLayer> layers;
+        layers.reserve(masks.size());
+        for (const AdminViewModel::EditorMaskEntry &entry : masks) {
+            MaskLayer layer;
+            layer.number = entry.number;
+            layer.contour = entry.contour;
+            layers.append(layer);
+        }
+        const QImage hidden = processor->applyHideMasks(source, layers);
         return hidden.isNull() ? source : hidden;
     }));
 }
@@ -336,6 +558,16 @@ void AdminViewModel::setEditQuotes(const QString &quotes)
     }
     m_editQuotes = quotes;
     emit editQuotesChanged();
+}
+
+void AdminViewModel::setHybridAnimationStyle(const QString &style)
+{
+    const QString normalized = normalizeHybridAnimStyleValue(style);
+    if (m_hybridAnimationStyle == normalized) {
+        return;
+    }
+    m_hybridAnimationStyle = normalized;
+    emit hybridAnimationStyleChanged();
 }
 
 void AdminViewModel::refreshPresets()
@@ -508,8 +740,19 @@ int AdminViewModel::evaluateRoundTemplateStatus(int roundId) const
     }
 
     bool hasMask = false;
-    if (layout == QStringLiteral("FULL_MASK") && puzzle.templateId > 0) {
-        hasMask = !m_database->maskTemplateContour(puzzle.templateId).isEmpty();
+    if (layout == QStringLiteral("FULL_MASK")) {
+        const QVector<PuzzleMaskInfo> masks = m_database->listPuzzleMasks(puzzle.id);
+        if (!masks.isEmpty()) {
+            hasMask = true;
+            for (const PuzzleMaskInfo &mask : masks) {
+                if (mask.contourPoints.trimmed().isEmpty() || mask.answerText.trimmed().isEmpty()) {
+                    hasMask = false;
+                    break;
+                }
+            }
+        } else if (puzzle.templateId > 0) {
+            hasMask = !m_database->maskTemplateContour(puzzle.templateId).isEmpty();
+        }
     }
 
     const bool hasHint = !m_database->localizedString(puzzle.hintTextKey).trimmed().isEmpty();
@@ -606,27 +849,29 @@ void AdminViewModel::openRoundConfig(int roundId)
     }
 
     if (!isRoundEnabled(roundId)) {
-        setStatusMessage(QStringLiteral("Сначала включите раунд в пресете"));
-        return;
+        setRoundEnabled(roundId, true);
     }
 
-    setSelectedRoundId(roundId);
+    if (m_selectedRoundId != roundId) {
+        setSelectedRoundId(roundId);
+    } else if (m_database && roundId > 0) {
+        const RoundInfo round = m_database->roundById(roundId);
+        m_selectedRoundLayoutType = round.layoutType;
+        emit selectedRoundIdChanged(roundId);
+        emit imageSlotsChanged();
+        refreshPuzzles();
+    }
 
     const RoundInfo round = m_database->roundById(roundId);
     m_configRoundTitle = m_database->localizedString(round.titleKey);
+    m_configRoundRule = m_database->localizedString(round.ruleTextKey);
 
+    if (!ensureRoundPuzzleTemplates(roundId, GameConstants::MAX_PUZZLES_PER_ROUND)) {
+        setStatusMessage(QStringLiteral("Не удалось создать шаблоны вопросов для раунда"));
+        return;
+    }
     refreshPuzzles();
-    if (m_puzzles.isEmpty()) {
-        const int puzzleId = m_database->createPuzzle(roundId,
-                                                      QString(),
-                                                      QString());
-        if (puzzleId <= 0) {
-            setStatusMessage(QStringLiteral("Не удалось создать шаблон раунда"));
-            return;
-        }
-        refreshPuzzles();
-        selectPuzzle(puzzleId);
-    } else {
+    if (!m_puzzles.isEmpty()) {
         const QVariantMap first = m_puzzles.first().toMap();
         selectPuzzle(first.value(QStringLiteral("id")).toInt());
     }
@@ -645,7 +890,15 @@ void AdminViewModel::closeRoundConfig()
     if (!m_roundConfigOpen) {
         return;
     }
-    cacheCurrentSlotState();
+
+    ++m_editorGuardDepth;
+    if (m_selectedPuzzleId > 0) {
+        queuePuzzleSave(capturePuzzleSaveSnapshot(m_selectedPuzzleId), false);
+    } else {
+        cacheCurrentSlotState();
+    }
+    --m_editorGuardDepth;
+
     m_roundConfigOpen = false;
     emit roundConfigOpenChanged();
 }
@@ -655,6 +908,34 @@ void AdminViewModel::saveRoundConfig()
     savePuzzle();
 }
 
+void AdminViewModel::autosaveEditorDraft()
+{
+    if (!m_database || m_editorGuardDepth > 0) {
+        return;
+    }
+
+    if (m_roundConfigOpen) {
+        if (m_selectedPuzzleId > 0) {
+            queuePuzzleSave(capturePuzzleSaveSnapshot(m_selectedPuzzleId), false);
+        }
+        return;
+    }
+
+    if (m_selectedPresetId <= 0 || m_editPresetName.trimmed().isEmpty()) {
+        return;
+    }
+
+    const QString savedName = selectedPresetName();
+    if (m_editPresetName == savedName) {
+        return;
+    }
+
+    if (!m_database->renamePreset(m_selectedPresetId, m_editPresetName)) {
+        return;
+    }
+    refreshPresets();
+}
+
 void AdminViewModel::addAnswerOption()
 {
     if (m_answerOptions.size() >= maxAnswerOptions()) {
@@ -662,6 +943,15 @@ void AdminViewModel::addAnswerOption()
         return;
     }
     m_answerOptions.append(QString());
+    emit answerOptionsChanged();
+}
+
+void AdminViewModel::removeAnswerOptionAt(int index)
+{
+    if (index < 0 || index >= m_answerOptions.size()) {
+        return;
+    }
+    m_answerOptions.removeAt(index);
     emit answerOptionsChanged();
 }
 
@@ -707,11 +997,96 @@ void AdminViewModel::setAnswerOptionAt(int index, const QString &text)
 
 QString AdminViewModel::cardTextPlaceholder(int index) const
 {
-    Q_UNUSED(index)
     if (m_selectedRoundLayoutType == QStringLiteral("TEXT_ONLY")) {
-        return QStringLiteral("Введите вопрос");
+        if (m_selectedRoundId == 2) {
+            return label(QStringLiteral("ui.editor.text_slot_association_format")).arg(index + 1);
+        }
+        return label(QStringLiteral("ui.editor.text_slot_quote_format")).arg(index + 1);
     }
-    return QStringLiteral("Введите текст карточки");
+    return label(QStringLiteral("ui.editor.text_slot_default_format")).arg(index + 1);
+}
+
+QString AdminViewModel::hostHintAt(int index) const
+{
+    if (index < 0) {
+        return {};
+    }
+    const QStringList parts = m_editHint.split(QStringLiteral("||"));
+    return index < parts.size() ? parts.at(index).trimmed() : QString();
+}
+
+void AdminViewModel::setHostHintAt(int index, const QString &text)
+{
+    if (index < 0) {
+        return;
+    }
+
+    QStringList parts = m_editHint.split(QStringLiteral("||"));
+    while (parts.size() <= index) {
+        parts.append(QString());
+    }
+    parts[index] = text;
+
+    while (parts.size() > 1 && parts.last().trimmed().isEmpty()) {
+        parts.removeLast();
+    }
+
+    QString packed;
+    for (int i = 0; i < parts.size(); ++i) {
+        if (i > 0) {
+            packed += QStringLiteral("||");
+        }
+        packed += parts.at(i);
+    }
+    setEditHint(packed);
+}
+
+void AdminViewModel::removeHostHintAt(int index)
+{
+    if (index < 0) {
+        return;
+    }
+
+    QStringList parts = m_editHint.split(QStringLiteral("||"), Qt::KeepEmptyParts);
+    if (parts.size() == 1 && parts.first().trimmed().isEmpty()) {
+        parts.clear();
+    }
+    if (index >= parts.size()) {
+        return;
+    }
+    parts.removeAt(index);
+
+    QString packed;
+    for (int i = 0; i < parts.size(); ++i) {
+        if (i > 0) {
+            packed += QStringLiteral("||");
+        }
+        packed += parts.at(i);
+    }
+    setEditHint(packed);
+}
+
+QString AdminViewModel::imageSlotLabel(int index) const
+{
+    if (m_selectedRoundLayoutType == QStringLiteral("SINGLE_HYBRID")) {
+        switch (index) {
+        case 0:
+            return label(QStringLiteral("ui.editor.image_slot_merged"));
+        case 1:
+            return label(QStringLiteral("ui.editor.image_slot_left"));
+        case 2:
+            return label(QStringLiteral("ui.editor.image_slot_right"));
+        default:
+            break;
+        }
+    }
+    if (m_selectedRoundLayoutType == QStringLiteral("EQUATION")) {
+        if (index < 2) {
+            return label(QStringLiteral("ui.editor.image_slot_operand_format")).arg(index + 1);
+        }
+        return label(QStringLiteral("ui.editor.image_slot_answer"));
+    }
+    return label(QStringLiteral("ui.editor.image_slot_default_format")).arg(index + 1);
 }
 
 QString AdminViewModel::answerOptionPlaceholder() const
@@ -736,12 +1111,23 @@ void AdminViewModel::ensureConfigCardTextSize()
 
 void AdminViewModel::selectPuzzle(int puzzleId)
 {
-    cacheCurrentSlotState();
+    if (puzzleId <= 0 || puzzleId == m_selectedPuzzleId) {
+        return;
+    }
+
+    ++m_editorGuardDepth;
+    if (m_selectedPuzzleId > 0) {
+        queuePuzzleSave(capturePuzzleSaveSnapshot(m_selectedPuzzleId), false);
+    } else {
+        cacheCurrentSlotState();
+    }
+
     m_selectedPuzzleId = puzzleId;
     m_selectedImageSlot = 0;
     emit selectedPuzzleIdChanged();
     emit selectedImageSlotChanged();
     loadPuzzleEditor(puzzleId);
+    --m_editorGuardDepth;
 }
 
 void AdminViewModel::focusPhotoMaskRound()
@@ -791,14 +1177,18 @@ void AdminViewModel::startPhotoPuzzle()
 
 void AdminViewModel::createPuzzle()
 {
+    if (m_puzzles.size() >= GameConstants::MAX_PUZZLES_PER_ROUND) {
+        setStatusMessage(QStringLiteral("Максимум %1 вопросов на раунд")
+                             .arg(GameConstants::MAX_PUZZLES_PER_ROUND));
+        return;
+    }
+
     if (!m_database || m_selectedRoundId <= 0) {
         setStatusMessage(QStringLiteral("Сначала выберите раунд"));
         return;
     }
 
-    const int puzzleId = m_database->createPuzzle(m_selectedRoundId,
-                                                  QStringLiteral("Ответ"),
-                                                  QStringLiteral("Подсказка"));
+    const int puzzleId = m_database->createPuzzle(m_selectedRoundId, QString(), QString());
     if (puzzleId <= 0) {
         setStatusMessage(QStringLiteral("Не удалось создать загадку"));
         return;
@@ -809,111 +1199,271 @@ void AdminViewModel::createPuzzle()
     setStatusMessage(QStringLiteral("Загадка создана"));
 }
 
+bool AdminViewModel::ensureRoundPuzzleTemplates(int roundId, int targetCount)
+{
+    if (!m_database || roundId <= 0) {
+        return false;
+    }
+
+    const int limit = std::max(1, targetCount);
+    if (!m_database->ensurePuzzleTemplates(roundId, limit)) {
+        return false;
+    }
+    return m_database->normalizePuzzleSortOrder(roundId);
+}
+
+QHash<int, QByteArray> AdminViewModel::encodedSlotImages(const PuzzleSaveSnapshot &snapshot)
+{
+    QHash<int, QByteArray> encoded;
+    const auto encodeImage = [](const QImage &image) -> QByteArray {
+        if (image.isNull()) {
+            return {};
+        }
+        QByteArray bytes;
+        QBuffer buffer(&bytes);
+        buffer.open(QIODevice::WriteOnly);
+        image.save(&buffer, "PNG");
+        return bytes;
+    };
+
+    QHash<int, QImage> images = snapshot.slotImageCache;
+    for (auto it = snapshot.slotPendingBytes.constBegin(); it != snapshot.slotPendingBytes.constEnd(); ++it) {
+        if (!it.value().isEmpty()) {
+            encoded.insert(it.key(), it.value());
+            images.remove(it.key());
+        }
+    }
+    for (auto it = images.constBegin(); it != images.constEnd(); ++it) {
+        const QByteArray bytes = encodeImage(it.value());
+        if (!bytes.isEmpty()) {
+            encoded.insert(it.key(), bytes);
+        }
+    }
+    return encoded;
+}
+
+bool AdminViewModel::persistPuzzleSnapshot(DatabaseManager *database,
+                                           const PuzzleSaveSnapshot &snapshot,
+                                           QString *errorMessage)
+{
+    if (!database || snapshot.puzzleId <= 0) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Database unavailable");
+        }
+        return false;
+    }
+
+    if (!database->updatePuzzle(snapshot.puzzleId,
+                                snapshot.answer,
+                                snapshot.hint,
+                                snapshot.quoteSlotsJson,
+                                snapshot.answerOptionsJson)) {
+        return false;
+    }
+
+    const QHash<int, QByteArray> slotImages = encodedSlotImages(snapshot);
+    for (auto it = slotImages.constBegin(); it != slotImages.constEnd(); ++it) {
+        if (!database->upsertPuzzleImage(snapshot.puzzleId, it.key(), it.value())) {
+            return false;
+        }
+    }
+
+    if (snapshot.replaceMasks) {
+        QVector<PuzzleMaskInfo> masks;
+        masks.reserve(snapshot.editorMasks.size());
+        for (const EditorMaskEntry &entry : snapshot.editorMasks) {
+            if (entry.contour.trimmed().isEmpty()) {
+                continue;
+            }
+            PuzzleMaskInfo mask;
+            mask.sortOrder = entry.number;
+            mask.answerText = entry.answer.trimmed();
+            mask.contourPoints = entry.contour;
+            masks.append(mask);
+        }
+        if (!masks.isEmpty() && !database->replacePuzzleMasks(snapshot.puzzleId, masks)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 void AdminViewModel::savePuzzle()
 {
+    if (!validatePuzzleEditor()) {
+        return;
+    }
+
+    setStatusMessage(QStringLiteral("Сохранение..."));
+    queuePuzzleSave(capturePuzzleSaveSnapshot(m_selectedPuzzleId), true);
+}
+
+bool AdminViewModel::validatePuzzleEditor()
+{
     if (!m_database || m_selectedPuzzleId <= 0) {
-        return;
+        return false;
     }
 
-    cacheCurrentSlotState();
-
-    if (m_editAnswer.trimmed().isEmpty() && isPhotoMaskRound()) {
-        setStatusMessage(QStringLiteral("Введите правильный ответ"));
-        return;
+    if (isPhotoMaskRound() && m_editorMasks.isEmpty()) {
+        setStatusMessage(QStringLiteral("Добавьте хотя бы одну маску на фото"));
+        return false;
     }
 
-    if (isPhotoMaskRound() && m_maskContour.isEmpty()) {
-        setStatusMessage(QStringLiteral("Нажмите на объект на фото, чтобы скрыть его"));
-        return;
+    if (isPhotoMaskRound()) {
+        for (const EditorMaskEntry &mask : m_editorMasks) {
+            if (mask.answer.trimmed().isEmpty()) {
+                setStatusMessage(QStringLiteral("Укажите ответ для каждой маски"));
+                return false;
+            }
+        }
     }
 
     if (isPhotoMaskRound() && !slotHasImage(0)) {
         setStatusMessage(QStringLiteral("Загрузите фото в первую ячейку"));
-        return;
+        return false;
     }
 
-    if (!m_database->updatePuzzle(m_selectedPuzzleId,
-                                  m_editAnswer,
-                                  m_editHint,
-                                  quoteSlotsJsonFromEditor(),
-                                  answerOptionsJsonFromEditor())) {
-        setStatusMessage(QStringLiteral("Не удалось сохранить загадку"));
-        return;
-    }
+    return true;
+}
+
+AdminViewModel::PuzzleSaveSnapshot AdminViewModel::capturePuzzleSaveSnapshot(int puzzleId)
+{
+    cacheCurrentSlotState();
+
+    PuzzleSaveSnapshot snapshot;
+    snapshot.puzzleId = puzzleId;
+    snapshot.layoutType = m_selectedRoundLayoutType;
+    snapshot.answer = m_editAnswer;
+    snapshot.hint = m_editHint;
+    snapshot.hybridAnimationStyle = m_hybridAnimationStyle;
+    snapshot.editorMasks = m_editorMasks;
+    snapshot.slotImageCache = m_slotImageCache;
+    snapshot.slotPendingBytes = m_slotPendingBytes;
+    snapshot.selectedImageSlot = m_selectedImageSlot;
+    snapshot.replaceMasks = isPhotoMaskRound() && !m_editorMasks.isEmpty();
 
     if (!m_sourceImage.isNull()) {
-        QByteArray imageBytes;
-        QBuffer buffer(&imageBytes);
-        buffer.open(QIODevice::WriteOnly);
-        m_sourceImage.save(&buffer, "PNG");
-        m_database->upsertPuzzleImage(m_selectedPuzzleId, m_selectedImageSlot, imageBytes);
-        m_slotImageCache.insert(m_selectedImageSlot, m_sourceImage);
+        snapshot.slotImageCache.insert(m_selectedImageSlot, m_sourceImage);
     }
-
     if (!m_pendingImageBytes.isEmpty()) {
-        m_database->upsertPuzzleImage(m_selectedPuzzleId, m_selectedImageSlot, m_pendingImageBytes);
-        m_slotPendingBytes.remove(m_selectedImageSlot);
-        m_pendingImageBytes.clear();
+        snapshot.slotPendingBytes.insert(m_selectedImageSlot, m_pendingImageBytes);
     }
 
-    for (auto it = m_slotImageCache.constBegin(); it != m_slotImageCache.constEnd(); ++it) {
-        if (it.key() == m_selectedImageSlot || it.value().isNull()) {
-            continue;
-        }
-        QByteArray imageBytes;
-        QBuffer buffer(&imageBytes);
-        buffer.open(QIODevice::WriteOnly);
-        it.value().save(&buffer, "PNG");
-        m_database->upsertPuzzleImage(m_selectedPuzzleId, it.key(), imageBytes);
-    }
-
-    for (auto it = m_slotPendingBytes.constBegin(); it != m_slotPendingBytes.constEnd(); ++it) {
-        if (it.key() == m_selectedImageSlot) {
-            continue;
-        }
-        m_database->upsertPuzzleImage(m_selectedPuzzleId, it.key(), it.value());
-    }
-    m_slotPendingBytes.clear();
-
-    if (!m_maskContour.isEmpty()) {
-        QImage maskSource = m_slotImageCache.value(0);
-        if (maskSource.isNull() && m_selectedImageSlot == 0) {
-            maskSource = m_sourceImage;
-        }
-        if (maskSource.isNull() && m_database) {
-            const QByteArray slot0Data = m_database->puzzleImageData(m_selectedPuzzleId, 0);
-            if (!slot0Data.isEmpty()) {
-                maskSource.loadFromData(slot0Data);
-            }
-        }
-
-        if (!maskSource.isNull()) {
-            QByteArray imageBytes;
-            QBuffer buffer(&imageBytes);
-            buffer.open(QIODevice::WriteOnly);
-            maskSource.save(&buffer, "PNG");
-
-            const int templateId = m_database->upsertMaskTemplate(m_selectedTemplateId,
-                                                                  QStringLiteral("mask_%1").arg(m_selectedPuzzleId),
-                                                                  imageBytes,
-                                                                  m_maskContour);
-            if (templateId > 0) {
-                m_selectedTemplateId = templateId;
-                m_database->setPuzzleTemplateId(m_selectedPuzzleId, templateId);
+    const bool photoMask = isPhotoMaskRound();
+    QString answer = snapshot.answer;
+    if (!photoMask && answer.trimmed().isEmpty()) {
+        for (const QString &option : m_answerOptions) {
+            if (!option.trimmed().isEmpty()) {
+                answer = option.trimmed();
+                break;
             }
         }
     }
-
-    ++m_puzzleImageRevision;
-    emit puzzleImageChanged();
-    if (m_imageProvider && m_selectedPuzzleId > 0) {
-        m_imageProvider->invalidatePuzzle(m_selectedPuzzleId);
+    if (photoMask && answer.trimmed().isEmpty()) {
+        for (const EditorMaskEntry &mask : snapshot.editorMasks) {
+            if (!mask.answer.trimmed().isEmpty()) {
+                answer = mask.answer.trimmed();
+                break;
+            }
+        }
     }
+    if (photoMask && !snapshot.editorMasks.isEmpty()) {
+        QStringList uniqueAnswers;
+        for (const EditorMaskEntry &mask : snapshot.editorMasks) {
+            const QString key = normalizeAnswerKey(mask.answer);
+            bool exists = false;
+            for (const QString &existing : uniqueAnswers) {
+                if (normalizeAnswerKey(existing) == key) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                uniqueAnswers.append(mask.answer.trimmed());
+            }
+        }
+        answer = uniqueAnswers.join(QStringLiteral(", "));
+    }
+    snapshot.answer = answer;
+    snapshot.quoteSlotsJson = quoteSlotsJsonFromEditor();
+    snapshot.answerOptionsJson = answerOptionsJsonFromEditor();
+    return snapshot;
+}
+
+void AdminViewModel::queuePuzzleSave(PuzzleSaveSnapshot snapshot, bool userInitiated)
+{
+    if (!m_database || snapshot.puzzleId <= 0) {
+        return;
+    }
+
+    setPuzzleSavingBusy(true);
+    DatabaseManager *database = m_database;
+
+    auto *watcher = new QFutureWatcher<PuzzleSaveOutcome>(this);
+    connect(watcher, &QFutureWatcher<PuzzleSaveOutcome>::finished, this, [this, watcher, userInitiated]() {
+        const PuzzleSaveOutcome outcome = watcher->result();
+        watcher->deleteLater();
+        setPuzzleSavingBusy(false);
+        onPuzzleSaveFinished(outcome.puzzleId,
+                             outcome.success,
+                             userInitiated,
+                             outcome.errorMessage);
+    });
+    watcher->setFuture(QtConcurrent::run([database, snapshot]() -> PuzzleSaveOutcome {
+        PuzzleSaveOutcome outcome;
+        outcome.puzzleId = snapshot.puzzleId;
+        outcome.success = AdminViewModel::persistPuzzleSnapshot(database, snapshot, &outcome.errorMessage);
+        return outcome;
+    }));
+}
+
+void AdminViewModel::onPuzzleSaveFinished(int puzzleId,
+                                          bool success,
+                                          bool userInitiated,
+                                          const QString &errorMessage)
+{
+    if (!success) {
+        if (userInitiated) {
+            setStatusMessage(errorMessage.isEmpty()
+                                 ? QStringLiteral("Не удалось сохранить загадку")
+                                 : errorMessage);
+        }
+        return;
+    }
+
+    if (m_imageProvider) {
+        m_imageProvider->invalidatePuzzle(puzzleId);
+    }
+
+    if (puzzleId == m_selectedPuzzleId) {
+        ++m_puzzleImageRevision;
+        emit puzzleImageChanged();
+        notifySlotImagesChanged();
+    }
+
+    if (!userInitiated || puzzleId != m_selectedPuzzleId) {
+        return;
+    }
+
     refreshPuzzles();
     loadPuzzleEditor(m_selectedPuzzleId);
     rebuildCatalogRounds();
     emit catalogRoundsChanged();
     setStatusMessage(QStringLiteral("Загадка сохранена"));
+}
+
+void AdminViewModel::setPuzzleSavingBusy(bool starting)
+{
+    const bool wasSaving = m_pendingPuzzleSaves > 0;
+    if (starting) {
+        ++m_pendingPuzzleSaves;
+    } else {
+        m_pendingPuzzleSaves = qMax(0, m_pendingPuzzleSaves - 1);
+    }
+    if (wasSaving != (m_pendingPuzzleSaves > 0)) {
+        emit puzzleSavingChanged();
+    }
 }
 
 void AdminViewModel::deleteSelectedPuzzle()
@@ -951,8 +1501,8 @@ bool AdminViewModel::importPuzzleImage(const QUrl &fileUrl)
     m_slotImageCache.insert(m_selectedImageSlot, m_sourceImage);
 
     if (m_selectedImageSlot == 0) {
-        m_maskContour.clear();
-        emit maskContourChanged();
+        m_editorMasks.clear();
+        emit masksChanged();
     }
 
     refreshEditorPreview();
@@ -965,6 +1515,7 @@ bool AdminViewModel::importPuzzleImage(const QUrl &fileUrl)
         emit puzzleImageChanged();
     }
 
+    notifySlotImagesChanged();
     setStatusMessage(QStringLiteral("Фото загружено в ячейку %1 — нажмите на объект")
                          .arg(m_selectedImageSlot + 1));
     return true;
@@ -1008,13 +1559,18 @@ bool AdminViewModel::markMissingRegion(double relX, double relY, double relW, do
             if (contour.isEmpty()) {
                 setStatusMessage(QStringLiteral("Не удалось выделить объект — обведите его рамкой"));
             } else {
-                m_maskContour = contour;
-                emit maskContourChanged();
+                EditorMaskEntry entry;
+                entry.number = m_editorMasks.size() + 1;
+                entry.contour = contour;
+                entry.answer.clear();
+                m_editorMasks.append(entry);
+                emit masksChanged();
+                regenerateGroupedAnswerOptions();
                 if (m_imageProvider && m_selectedPuzzleId > 0) {
                     m_imageProvider->invalidatePuzzle(m_selectedPuzzleId);
                 }
                 refreshEditorPreview();
-                setStatusMessage(QStringLiteral("Объект скрыт — так увидит игрок. Сохраните загадку"));
+                setStatusMessage(QStringLiteral("Маска %1 добавлена — укажите ответ").arg(entry.number));
             }
         }
         if (m_maskProcessing) {
@@ -1042,10 +1598,12 @@ void AdminViewModel::clearMask()
         return;
     }
 
-    m_maskContour.clear();
-    emit maskContourChanged();
+    m_editorMasks.clear();
+    m_answerOptions.clear();
+    emit answerOptionsChanged();
+    emit masksChanged();
     refreshEditorPreview();
-    setStatusMessage(QStringLiteral("Маска сброшена"));
+    setStatusMessage(QStringLiteral("Все маски сброшены"));
 }
 
 QString AdminViewModel::label(const QString &key) const
@@ -1097,6 +1655,7 @@ void AdminViewModel::rebuildCatalogRounds()
         QVariantMap map;
         map.insert(QStringLiteral("id"), round.id);
         map.insert(QStringLiteral("title"), m_database->localizedString(round.titleKey));
+        map.insert(QStringLiteral("rule"), m_database->localizedString(round.ruleTextKey));
         map.insert(QStringLiteral("layoutType"), round.layoutType);
         map.insert(QStringLiteral("dataStatus"), evaluateRoundTemplateStatus(round.id));
         m_catalogRounds.append(map);
@@ -1124,11 +1683,18 @@ void AdminViewModel::rebuildPuzzleList()
     }
 
     const QVector<PuzzleInfo> items = m_database->listPuzzlesForRound(m_selectedRoundId);
+    int displayNumber = 0;
     for (const PuzzleInfo &puzzle : items) {
+        if (displayNumber >= GameConstants::MAX_PUZZLES_PER_ROUND) {
+            break;
+        }
+        ++displayNumber;
         QVariantMap map;
         map.insert(QStringLiteral("id"), puzzle.id);
         map.insert(QStringLiteral("answer"), puzzle.correctAnswer);
-        map.insert(QStringLiteral("sortOrder"), puzzle.sortOrder);
+        map.insert(QStringLiteral("sortOrder"), displayNumber);
+        map.insert(QStringLiteral("title"),
+                   label(QStringLiteral("ui.editor.question_item_format")).arg(displayNumber));
         m_puzzles.append(map);
     }
 }
@@ -1148,6 +1714,7 @@ void AdminViewModel::loadPuzzleEditor(int puzzleId)
 
     m_slotImageCache.clear();
     m_slotPendingBytes.clear();
+    preloadPuzzleSlotImages(puzzleId);
     m_editAnswer = puzzle.correctAnswer;
     m_editHint = m_database->localizedString(puzzle.hintTextKey);
     m_selectedTemplateId = puzzle.templateId;
@@ -1171,18 +1738,25 @@ void AdminViewModel::loadPuzzleEditor(int puzzleId)
         const QJsonDocument optionsDoc = QJsonDocument::fromJson(puzzle.correctOrder.toUtf8());
         if (optionsDoc.isArray()) {
             for (const QJsonValue &value : optionsDoc.array()) {
-                m_answerOptions.append(value.toString());
+                const QString option = value.toString().trimmed();
+                if (option.isEmpty() || option.startsWith(kHybridAnimPrefix)) {
+                    continue;
+                }
+                m_answerOptions.append(option);
             }
         }
     }
+    setHybridAnimationStyle(parseHybridAnimStyleFromCorrectOrder(puzzle.correctOrder));
     emit answerOptionsChanged();
     emit cardTextsChanged();
 
     m_selectedImageSlot = 0;
     emit selectedImageSlotChanged();
-    emit imageSlotsChanged();
+    notifySlotImagesChanged();
 
     loadImageSlot(0);
+    loadEditorMasks(puzzleId);
+    regenerateGroupedAnswerOptions();
 
     emit editAnswerChanged();
     emit editHintChanged();
@@ -1197,6 +1771,25 @@ void AdminViewModel::loadPuzzleEditor(int puzzleId)
     }
 }
 
+void AdminViewModel::preloadPuzzleSlotImages(int puzzleId)
+{
+    if (!m_database || puzzleId <= 0) {
+        return;
+    }
+
+    const int slotCount = imageSlotCount();
+    for (int slot = 0; slot < slotCount; ++slot) {
+        const QByteArray imageData = m_database->puzzleImageData(puzzleId, slot);
+        if (imageData.isEmpty()) {
+            continue;
+        }
+        QImage image;
+        if (image.loadFromData(imageData)) {
+            m_slotImageCache.insert(slot, image);
+        }
+    }
+}
+
 void AdminViewModel::clearPuzzleEditor()
 {
     m_selectedPuzzleId = 0;
@@ -1207,7 +1800,8 @@ void AdminViewModel::clearPuzzleEditor()
     m_editQuotes.clear();
     m_configCardTexts.clear();
     m_answerOptions.clear();
-    m_maskContour.clear();
+    setHybridAnimationStyle(QStringLiteral("soft"));
+    m_editorMasks.clear();
     m_sourceImage = QImage();
     m_previewImage = QImage();
     m_pendingImageBytes.clear();
@@ -1220,13 +1814,13 @@ void AdminViewModel::clearPuzzleEditor()
 
     emit selectedPuzzleIdChanged();
     emit selectedImageSlotChanged();
-    emit imageSlotsChanged();
+    notifySlotImagesChanged();
     emit editAnswerChanged();
     emit editHintChanged();
     emit editQuotesChanged();
     emit answerOptionsChanged();
     emit cardTextsChanged();
-    emit maskContourChanged();
+    emit masksChanged();
     emit previewImageChanged();
     emit puzzleImageChanged();
 }
@@ -1258,6 +1852,12 @@ void AdminViewModel::bumpPreviewRevision()
     emit previewImageChanged();
 }
 
+void AdminViewModel::notifySlotImagesChanged()
+{
+    ++m_slotImageRevision;
+    emit slotImagesChanged();
+}
+
 QString AdminViewModel::quoteSlotsJsonFromEditor() const
 {
     if (!m_configCardTexts.isEmpty()) {
@@ -1283,13 +1883,26 @@ QString AdminViewModel::quoteSlotsJsonFromEditor() const
 
 QString AdminViewModel::answerOptionsJsonFromEditor() const
 {
+    if (m_selectedRoundLayoutType == QStringLiteral("SINGLE_HYBRID")) {
+        QJsonArray array;
+        array.append(QStringLiteral("%1%2")
+                         .arg(QString(kHybridAnimPrefix), normalizeHybridAnimStyleValue(m_hybridAnimationStyle)));
+        return QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact));
+    }
+
     if (m_answerOptions.isEmpty()) {
         return {};
     }
 
     QJsonArray array;
     for (const QString &option : m_answerOptions) {
-        array.append(option);
+        const QString trimmed = option.trimmed();
+        if (!trimmed.isEmpty()) {
+            array.append(trimmed);
+        }
+    }
+    if (array.isEmpty()) {
+        return {};
     }
     return QString::fromUtf8(QJsonDocument(array).toJson(QJsonDocument::Compact));
 }

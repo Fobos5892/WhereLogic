@@ -4,6 +4,12 @@
 #include <QObject>
 #include <QPointF>
 #include <QString>
+#include <QVector>
+
+struct MaskLayer {
+    int number = 0;
+    QString contour;
+};
 
 class ImageProcessor : public QObject
 {
@@ -20,6 +26,9 @@ public:
                                              double relH);
     Q_INVOKABLE QImage applyMask(const QImage &image, const QString &contourPoints);
     Q_INVOKABLE QImage applyHideMask(const QImage &image, const QString &contourPoints);
+    Q_INVOKABLE QImage applyHideMasks(const QImage &image,
+                                      const QVector<MaskLayer> &masks,
+                                      const QVector<int> &revealedMaskNumbers = {});
 
 signals:
     void contourExtracted(const QString &contourPoints);

@@ -10,6 +10,8 @@
 #include <QStandardPaths>
 #include <QUuid>
 
+#include <algorithm>
+
 namespace {
 
 constexpr QLatin1String kTestPresetName("Тестовая игра");
@@ -149,7 +151,10 @@ bool DatabaseManager::openDatabase()
 
 bool DatabaseManager::createSchema()
 {
-    return executeSchemaStatements();
+    if (!executeSchemaStatements()) {
+        return false;
+    }
+    return migrateLegacyMaskTemplates() && migrateRoundCatalogLayouts();
 }
 
 bool DatabaseManager::executeSchemaStatements()
@@ -211,6 +216,14 @@ bool DatabaseManager::executeSchemaStatements()
             "puzzle_id INTEGER NOT NULL,"
             "slot_index INTEGER NOT NULL,"
             "image_data BLOB NOT NULL,"
+            "FOREIGN KEY(puzzle_id) REFERENCES puzzles(id) ON DELETE CASCADE)"),
+        QStringLiteral(
+            "CREATE TABLE IF NOT EXISTS puzzle_masks ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "puzzle_id INTEGER NOT NULL,"
+            "sort_order INTEGER NOT NULL,"
+            "answer_text TEXT NOT NULL,"
+            "contour_points TEXT NOT NULL,"
             "FOREIGN KEY(puzzle_id) REFERENCES puzzles(id) ON DELETE CASCADE)"),
         QStringLiteral(
             "CREATE TABLE IF NOT EXISTS current_teams ("
@@ -485,7 +498,7 @@ bool DatabaseManager::seedCatalogRounds()
 
     const RoundSeed catalog[] = {
         {1, "round.1.title", "round.1.rule", "STANDARD", 60, 15},
-        {2, "round.2.title", "round.2.rule", "STANDARD", 60, 15},
+        {2, "round.2.title", "round.2.rule", "TEXT_ONLY", 60, 15},
         {3, "round.3.title", "round.3.rule", "EQUATION", 90, 22},
         {4, "round.4.title", "round.4.rule", "STANDARD", 90, 22},
         {5, "round.5.title", "round.5.rule", "FULL_MASK", 120, 30},
@@ -793,6 +806,10 @@ int DatabaseManager::createPuzzle(int roundId, const QString &answer, const QStr
 {
     QMutexLocker locker(&m_mutex);
     QSqlDatabase db = database();
+
+    QString resolvedAnswer = answer.trimmed();
+    QString resolvedHint = hintText.trimmed();
+
     if (!db.transaction()) {
         emit databaseError(db.lastError().text());
         return 0;
@@ -814,7 +831,7 @@ int DatabaseManager::createPuzzle(int roundId, const QString &answer, const QStr
         "VALUES (?, ?, ?, '', 100)"));
     insertQuery.addBindValue(roundId);
     insertQuery.addBindValue(sortOrder);
-    insertQuery.addBindValue(answer.trimmed());
+    insertQuery.addBindValue(resolvedAnswer);
     if (!insertQuery.exec()) {
         emit databaseError(insertQuery.lastError().text());
         db.rollback();
@@ -840,7 +857,7 @@ int DatabaseManager::createPuzzle(int roundId, const QString &answer, const QStr
         "ON CONFLICT(string_key, lang_code) DO UPDATE SET translated_text = excluded.translated_text"));
     locRu.addBindValue(hintKey);
     locRu.addBindValue(QStringLiteral("ru"));
-    locRu.addBindValue(hintText.trimmed());
+    locRu.addBindValue(resolvedHint);
     if (!locRu.exec()) {
         emit databaseError(locRu.lastError().text());
         db.rollback();
@@ -853,7 +870,7 @@ int DatabaseManager::createPuzzle(int roundId, const QString &answer, const QStr
         "ON CONFLICT(string_key, lang_code) DO UPDATE SET translated_text = excluded.translated_text"));
     locEn.addBindValue(hintKey);
     locEn.addBindValue(QStringLiteral("en"));
-    locEn.addBindValue(hintText.trimmed());
+    locEn.addBindValue(resolvedHint);
     if (!locEn.exec()) {
         emit databaseError(locEn.lastError().text());
         db.rollback();
@@ -865,6 +882,189 @@ int DatabaseManager::createPuzzle(int roundId, const QString &answer, const QStr
         return 0;
     }
     return puzzleId;
+}
+
+bool DatabaseManager::clearDefaultPuzzlePlaceholders(int roundId)
+{
+    QSqlDatabase db = database();
+    if (roundId <= 0) {
+        return false;
+    }
+
+    QSqlQuery clearAnswers(db);
+    clearAnswers.prepare(QStringLiteral(
+        "UPDATE puzzles SET correct_answer = '' WHERE round_id = ? AND correct_answer = ?"));
+    clearAnswers.addBindValue(roundId);
+    clearAnswers.addBindValue(QStringLiteral("Ответ"));
+    if (!clearAnswers.exec()) {
+        emit databaseError(clearAnswers.lastError().text());
+        return false;
+    }
+
+    QSqlQuery clearHints(db);
+    clearHints.prepare(QStringLiteral(
+        "UPDATE localization_strings SET translated_text = '' "
+        "WHERE lang_code IN ('ru', 'en') AND translated_text = ? "
+        "AND string_key IN (SELECT hint_text_key FROM puzzles WHERE round_id = ?)"));
+    clearHints.addBindValue(QStringLiteral("Подсказка"));
+    clearHints.addBindValue(roundId);
+    if (!clearHints.exec()) {
+        emit databaseError(clearHints.lastError().text());
+        return false;
+    }
+
+    return true;
+}
+
+bool DatabaseManager::ensurePuzzleTemplates(int roundId, int targetCount)
+{
+    QMutexLocker locker(&m_mutex);
+    QSqlDatabase db = database();
+    if (roundId <= 0 || targetCount <= 0) {
+        return false;
+    }
+
+    if (!clearDefaultPuzzlePlaceholders(roundId)) {
+        return false;
+    }
+
+    QSqlQuery countQuery(db);
+    countQuery.prepare(QStringLiteral("SELECT COUNT(*) FROM puzzles WHERE round_id = ?"));
+    countQuery.addBindValue(roundId);
+    if (!countQuery.exec() || !countQuery.next()) {
+        emit databaseError(countQuery.lastError().text());
+        return false;
+    }
+
+    const int existingCount = countQuery.value(0).toInt();
+    if (existingCount >= targetCount) {
+        return true;
+    }
+
+    if (!db.transaction()) {
+        emit databaseError(db.lastError().text());
+        return false;
+    }
+
+    int nextSortOrder = existingCount + 1;
+    QSqlQuery maxQuery(db);
+    maxQuery.prepare(QStringLiteral("SELECT COALESCE(MAX(sort_order), 0) FROM puzzles WHERE round_id = ?"));
+    maxQuery.addBindValue(roundId);
+    if (maxQuery.exec() && maxQuery.next()) {
+        nextSortOrder = std::max(nextSortOrder, maxQuery.value(0).toInt() + 1);
+    }
+
+    for (int i = existingCount; i < targetCount; ++i) {
+        QSqlQuery insertQuery(db);
+        insertQuery.prepare(QStringLiteral(
+            "INSERT INTO puzzles (round_id, sort_order, correct_answer, hint_text_key, points) "
+            "VALUES (?, ?, ?, '', 100)"));
+        insertQuery.addBindValue(roundId);
+        insertQuery.addBindValue(nextSortOrder);
+        insertQuery.addBindValue(QString());
+        if (!insertQuery.exec()) {
+            emit databaseError(insertQuery.lastError().text());
+            db.rollback();
+            return false;
+        }
+
+        const int puzzleId = insertQuery.lastInsertId().toInt();
+        const QString hintKey = QStringLiteral("puzzle.hint.p%1").arg(puzzleId);
+
+        QSqlQuery hintKeyQuery(db);
+        hintKeyQuery.prepare(QStringLiteral("UPDATE puzzles SET hint_text_key = ? WHERE id = ?"));
+        hintKeyQuery.addBindValue(hintKey);
+        hintKeyQuery.addBindValue(puzzleId);
+        if (!hintKeyQuery.exec()) {
+            emit databaseError(hintKeyQuery.lastError().text());
+            db.rollback();
+            return false;
+        }
+
+        QSqlQuery locRu(db);
+        locRu.prepare(QStringLiteral(
+            "INSERT INTO localization_strings (string_key, lang_code, translated_text) VALUES (?, ?, ?) "
+            "ON CONFLICT(string_key, lang_code) DO UPDATE SET translated_text = excluded.translated_text"));
+        locRu.addBindValue(hintKey);
+        locRu.addBindValue(QStringLiteral("ru"));
+        locRu.addBindValue(QString());
+        if (!locRu.exec()) {
+            emit databaseError(locRu.lastError().text());
+            db.rollback();
+            return false;
+        }
+
+        QSqlQuery locEn(db);
+        locEn.prepare(QStringLiteral(
+            "INSERT INTO localization_strings (string_key, lang_code, translated_text) VALUES (?, ?, ?) "
+            "ON CONFLICT(string_key, lang_code) DO UPDATE SET translated_text = excluded.translated_text"));
+        locEn.addBindValue(hintKey);
+        locEn.addBindValue(QStringLiteral("en"));
+        locEn.addBindValue(QString());
+        if (!locEn.exec()) {
+            emit databaseError(locEn.lastError().text());
+            db.rollback();
+            return false;
+        }
+
+        ++nextSortOrder;
+    }
+
+    if (!db.commit()) {
+        emit databaseError(db.lastError().text());
+        return false;
+    }
+    return true;
+}
+
+bool DatabaseManager::normalizePuzzleSortOrder(int roundId)
+{
+    QMutexLocker locker(&m_mutex);
+    QSqlDatabase db = database();
+    if (roundId <= 0) {
+        return false;
+    }
+
+    QSqlQuery listQuery(db);
+    listQuery.prepare(QStringLiteral(
+        "SELECT id FROM puzzles WHERE round_id = ? ORDER BY sort_order, id"));
+    listQuery.addBindValue(roundId);
+    if (!listQuery.exec()) {
+        emit databaseError(listQuery.lastError().text());
+        return false;
+    }
+
+    QVector<int> puzzleIds;
+    while (listQuery.next()) {
+        puzzleIds.append(listQuery.value(0).toInt());
+    }
+
+    if (puzzleIds.isEmpty()) {
+        return true;
+    }
+
+    if (!db.transaction()) {
+        emit databaseError(db.lastError().text());
+        return false;
+    }
+
+    QSqlQuery updateQuery(db);
+    updateQuery.prepare(QStringLiteral("UPDATE puzzles SET sort_order = ? WHERE id = ?"));
+    for (int i = 0; i < puzzleIds.size(); ++i) {
+        updateQuery.addBindValue(i + 1);
+        updateQuery.addBindValue(puzzleIds.at(i));
+        if (!updateQuery.exec()) {
+            emit databaseError(updateQuery.lastError().text());
+            db.rollback();
+            return false;
+        }
+    }
+
+    if (!db.commit()) {
+        emit databaseError(db.lastError().text());
+        return false;
+    }
+    return true;
 }
 
 bool DatabaseManager::updatePuzzle(int puzzleId,
@@ -1018,6 +1218,148 @@ QByteArray DatabaseManager::maskTemplateImageData(int templateId) const
 QString DatabaseManager::maskTemplateContour(int templateId) const
 {
     return maskTemplateById(templateId).contourPoints;
+}
+
+QVector<PuzzleMaskInfo> DatabaseManager::listPuzzleMasks(int puzzleId) const
+{
+    QMutexLocker locker(&m_mutex);
+    QVector<PuzzleMaskInfo> masks;
+
+    if (puzzleId <= 0) {
+        return masks;
+    }
+
+    QSqlQuery query(database());
+    query.prepare(QStringLiteral(
+        "SELECT id, puzzle_id, sort_order, answer_text, contour_points "
+        "FROM puzzle_masks WHERE puzzle_id = ? ORDER BY sort_order"));
+    query.addBindValue(puzzleId);
+    if (!query.exec()) {
+        emit const_cast<DatabaseManager *>(this)->databaseError(query.lastError().text());
+        return masks;
+    }
+
+    while (query.next()) {
+        PuzzleMaskInfo info;
+        info.id = query.value(0).toInt();
+        info.puzzleId = query.value(1).toInt();
+        info.sortOrder = query.value(2).toInt();
+        info.answerText = query.value(3).toString();
+        info.contourPoints = query.value(4).toString();
+        masks.append(info);
+    }
+
+    return masks;
+}
+
+bool DatabaseManager::replacePuzzleMasks(int puzzleId, const QVector<PuzzleMaskInfo> &masks)
+{
+    QMutexLocker locker(&m_mutex);
+    if (puzzleId <= 0) {
+        return false;
+    }
+
+    QSqlDatabase db = database();
+    if (!db.transaction()) {
+        emit databaseError(db.lastError().text());
+        return false;
+    }
+
+    QSqlQuery deleteQuery(db);
+    deleteQuery.prepare(QStringLiteral("DELETE FROM puzzle_masks WHERE puzzle_id = ?"));
+    deleteQuery.addBindValue(puzzleId);
+    if (!deleteQuery.exec()) {
+        db.rollback();
+        emit databaseError(deleteQuery.lastError().text());
+        return false;
+    }
+
+    QSqlQuery insertQuery(db);
+    insertQuery.prepare(QStringLiteral(
+        "INSERT INTO puzzle_masks (puzzle_id, sort_order, answer_text, contour_points) "
+        "VALUES (?, ?, ?, ?)"));
+    for (const PuzzleMaskInfo &mask : masks) {
+        if (mask.contourPoints.trimmed().isEmpty()) {
+            continue;
+        }
+        insertQuery.addBindValue(puzzleId);
+        insertQuery.addBindValue(mask.sortOrder);
+        insertQuery.addBindValue(mask.answerText.trimmed());
+        insertQuery.addBindValue(mask.contourPoints);
+        if (!insertQuery.exec()) {
+            db.rollback();
+            emit databaseError(insertQuery.lastError().text());
+            return false;
+        }
+        insertQuery.clear();
+        insertQuery.prepare(QStringLiteral(
+            "INSERT INTO puzzle_masks (puzzle_id, sort_order, answer_text, contour_points) "
+            "VALUES (?, ?, ?, ?)"));
+    }
+
+    if (!db.commit()) {
+        emit databaseError(db.lastError().text());
+        return false;
+    }
+
+    return true;
+}
+
+bool DatabaseManager::migrateLegacyMaskTemplates()
+{
+    QSqlQuery query(database());
+    if (!query.exec(QStringLiteral(
+            "SELECT p.id, p.template_id, p.correct_answer "
+            "FROM puzzles p "
+            "WHERE p.template_id IS NOT NULL AND p.template_id > 0 "
+            "AND NOT EXISTS (SELECT 1 FROM puzzle_masks pm WHERE pm.puzzle_id = p.id)"))) {
+        emit databaseError(query.lastError().text());
+        return false;
+    }
+
+    while (query.next()) {
+        const int puzzleId = query.value(0).toInt();
+        const int templateId = query.value(1).toInt();
+        const QString answer = query.value(2).toString();
+        const QString contour = maskTemplateContour(templateId);
+        if (contour.isEmpty()) {
+            continue;
+        }
+
+        PuzzleMaskInfo mask;
+        mask.puzzleId = puzzleId;
+        mask.sortOrder = 1;
+        mask.answerText = answer;
+        mask.contourPoints = contour;
+        if (!replacePuzzleMasks(puzzleId, {mask})) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool DatabaseManager::migrateRoundCatalogLayouts()
+{
+    const struct LayoutFix {
+        int roundId;
+        const char *layoutType;
+    } fixes[] = {
+        {2, "TEXT_ONLY"},
+    };
+
+    for (const LayoutFix &fix : fixes) {
+        QSqlQuery query(database());
+        query.prepare(QStringLiteral("UPDATE rounds SET layout_type = ? WHERE id = ?"));
+        query.addBindValue(QString(fix.layoutType));
+        query.addBindValue(fix.roundId);
+        if (!query.exec()) {
+            emit databaseError(query.lastError().text());
+            return false;
+        }
+    }
+
+    return true;
 }
 
 QVector<RoundInfo> DatabaseManager::listRoundsForPreset(int presetId) const

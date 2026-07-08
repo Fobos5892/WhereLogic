@@ -45,7 +45,7 @@ Rectangle {
                     id: revealImage
                     anchors.fill: parent
                     anchors.margins: Theme.spacing
-                    source: gameViewModel.puzzleImageUrl(0)
+                    source: gameViewModel.puzzleSlot0DisplayUrl
                     fillMode: Image.PreserveAspectFit
                     cache: false
                     opacity: status === Image.Loading ? 0.35 : 1

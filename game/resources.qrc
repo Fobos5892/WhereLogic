@@ -16,6 +16,9 @@
         <file>qml/components/GameSlider.qml</file>
         <file>qml/components/GameButton.qml</file>
         <file>qml/components/GameTextField.qml</file>
+        <file>qml/components/SettingsTextField.qml</file>
+        <file>qml/components/EditorAutoSaveScope.qml</file>
+        <file>qml/components/GameComboBox.qml</file>
         <file>qml/components/NeonPanel.qml</file>
         <file>qml/components/StarRow.qml</file>
         <file>qml/components/GameCard.qml</file>

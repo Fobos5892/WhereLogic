@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include <QSet>
+
 namespace {
 
 #ifdef HAS_OPENCV
@@ -255,6 +257,74 @@ QString extractContourWithGrabCut(const cv::Mat &bgr, const cv::Rect &selection)
     }
 
     return contourStringFromPolygon(bestContour, imgW, imgH);
+}
+
+std::vector<cv::Point> contourFromMask(const cv::Mat &mask);
+void drawDashedPolygon(cv::Mat &bgr,
+                       const std::vector<cv::Point> &polygon,
+                       const cv::Scalar &color,
+                       int thickness);
+
+void drawHideRegion(cv::Mat &bgr,
+                    const cv::Mat &mask,
+                    int labelNumber,
+                    int cols,
+                    int rows)
+{
+    const cv::Scalar light(232, 237, 242);
+    const cv::Scalar dark(26, 34, 48);
+    constexpr int tile = 10;
+
+    for (int y = 0; y < bgr.rows; ++y) {
+        for (int x = 0; x < bgr.cols; ++x) {
+            if (mask.at<uchar>(y, x) == 0) {
+                continue;
+            }
+            const cv::Scalar fill = ((x / tile) + (y / tile)) % 2 == 0 ? light : dark;
+            bgr.at<cv::Vec3b>(y, x) = cv::Vec3b(
+                static_cast<uchar>(fill[0]),
+                static_cast<uchar>(fill[1]),
+                static_cast<uchar>(fill[2]));
+        }
+    }
+
+    const std::vector<cv::Point> polygon = contourFromMask(mask);
+    if (!polygon.empty()) {
+        drawDashedPolygon(bgr, polygon, cv::Scalar(255, 255, 255), 2);
+        drawDashedPolygon(bgr, polygon, cv::Scalar(0, 0, 0), 1);
+
+        const cv::Moments moments = cv::moments(mask, true);
+        if (moments.m00 > 0.0) {
+            const int cx = static_cast<int>(moments.m10 / moments.m00);
+            const int cy = static_cast<int>(moments.m01 / moments.m00);
+            const std::string mark = labelNumber > 0 ? std::to_string(labelNumber) : "?";
+            const double fontScale = std::clamp(std::min(cols, rows) / 180.0, 0.8, 2.4);
+            const cv::Size textSize = cv::getTextSize(mark, cv::FONT_HERSHEY_DUPLEX, fontScale, 2, nullptr);
+            const cv::Point origin(cx - textSize.width / 2, cy + textSize.height / 2);
+            cv::putText(bgr, mark, origin, cv::FONT_HERSHEY_DUPLEX, fontScale, cv::Scalar(0, 0, 0), 4, cv::LINE_AA);
+            cv::putText(bgr, mark, origin, cv::FONT_HERSHEY_DUPLEX, fontScale, cv::Scalar(255, 255, 255), 2, cv::LINE_AA);
+        }
+    }
+}
+
+std::vector<cv::Point> contourFromMask(const cv::Mat &mask)
+{
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    if (contours.empty()) {
+        return {};
+    }
+
+    size_t bestIdx = 0;
+    double largest = 0.0;
+    for (size_t i = 0; i < contours.size(); ++i) {
+        const double area = cv::contourArea(contours[i]);
+        if (area > largest) {
+            largest = area;
+            bestIdx = i;
+        }
+    }
+    return contours[bestIdx];
 }
 
 void drawDashedPolygon(cv::Mat &bgr, const std::vector<cv::Point> &polygon, const cv::Scalar &color, int thickness)
@@ -522,54 +592,49 @@ QImage ImageProcessor::applyHideMask(const QImage &image, const QString &contour
         return image;
     }
 
-#ifndef HAS_OPENCV
-    Q_UNUSED(contourPoints)
-    return image;
-#else
-    const QSize originalSize = image.size();
-    const QImage workImage = downscaleWorkImage(image);
-    cv::Mat mat = qImageToMat(workImage);
-    cv::Mat mask = buildFilledMask(contourPoints, mat.cols, mat.rows);
-    if (cv::countNonZero(mask) == 0) {
+    MaskLayer layer;
+    layer.number = 1;
+    layer.contour = contourPoints;
+    return applyHideMasks(image, {layer});
+}
+
+QImage ImageProcessor::applyHideMasks(const QImage &image,
+                                      const QVector<MaskLayer> &masks,
+                                      const QVector<int> &revealedMaskNumbers)
+{
+    if (image.isNull() || masks.isEmpty()) {
         return image;
     }
 
+#ifndef HAS_OPENCV
+    Q_UNUSED(masks)
+    Q_UNUSED(revealedMaskNumbers)
+    return image;
+#else
+    QSet<int> revealed;
+    for (int number : revealedMaskNumbers) {
+        revealed.insert(number);
+    }
+
+    const QSize originalSize = image.size();
+    const QImage workImage = downscaleWorkImage(image);
+    cv::Mat mat = qImageToMat(workImage);
     cv::Mat bgr;
     cv::cvtColor(mat, bgr, cv::COLOR_RGBA2BGR);
 
-    const cv::Scalar light(232, 237, 242);
-    const cv::Scalar dark(26, 34, 48);
-    constexpr int tile = 10;
-
-    for (int y = 0; y < bgr.rows; ++y) {
-        for (int x = 0; x < bgr.cols; ++x) {
-            if (mask.at<uchar>(y, x) == 0) {
-                continue;
-            }
-            const cv::Scalar fill = ((x / tile) + (y / tile)) % 2 == 0 ? light : dark;
-            bgr.at<cv::Vec3b>(y, x) = cv::Vec3b(
-                static_cast<uchar>(fill[0]),
-                static_cast<uchar>(fill[1]),
-                static_cast<uchar>(fill[2]));
+    for (const MaskLayer &layer : masks) {
+        if (layer.contour.trimmed().isEmpty()) {
+            continue;
         }
-    }
-
-    const std::vector<cv::Point> polygon = contourStringToPolygon(contourPoints, mat.cols, mat.rows);
-    if (!polygon.empty()) {
-        drawDashedPolygon(bgr, polygon, cv::Scalar(255, 255, 255), 2);
-        drawDashedPolygon(bgr, polygon, cv::Scalar(0, 0, 0), 1);
-
-        const cv::Moments moments = cv::moments(mask, true);
-        if (moments.m00 > 0.0) {
-            const int cx = static_cast<int>(moments.m10 / moments.m00);
-            const int cy = static_cast<int>(moments.m01 / moments.m00);
-            const std::string mark = "?";
-            const double fontScale = std::clamp(std::min(mat.cols, mat.rows) / 180.0, 0.8, 2.4);
-            const cv::Size textSize = cv::getTextSize(mark, cv::FONT_HERSHEY_DUPLEX, fontScale, 2, nullptr);
-            const cv::Point origin(cx - textSize.width / 2, cy + textSize.height / 2);
-            cv::putText(bgr, mark, origin, cv::FONT_HERSHEY_DUPLEX, fontScale, cv::Scalar(0, 0, 0), 4, cv::LINE_AA);
-            cv::putText(bgr, mark, origin, cv::FONT_HERSHEY_DUPLEX, fontScale, cv::Scalar(255, 255, 255), 2, cv::LINE_AA);
+        if (revealed.contains(layer.number)) {
+            continue;
         }
+
+        cv::Mat mask = buildFilledMask(layer.contour, bgr.cols, bgr.rows);
+        if (cv::countNonZero(mask) == 0) {
+            continue;
+        }
+        drawHideRegion(bgr, mask, layer.number, bgr.cols, bgr.rows);
     }
 
     cv::Mat rgba;

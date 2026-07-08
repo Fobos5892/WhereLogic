@@ -99,8 +99,8 @@ Item {
 
     Connections {
         target: adminViewModel
-        function onMaskContourChanged() {
-            if (adminViewModel.hasMaskContour && !root.selecting) {
+        function onMasksChanged() {
+            if (adminViewModel.maskEntryCount > 0 && !root.selecting) {
                 hasPendingRect = false
             }
         }

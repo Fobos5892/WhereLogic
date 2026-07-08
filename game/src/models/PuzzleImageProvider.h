@@ -1,12 +1,13 @@
 #pragma once
 
+#include "../models/ImageProcessor.h"
+
 #include <QHash>
 #include <QImage>
 #include <QMutex>
 #include <QQuickImageProvider>
 
 class DatabaseManager;
-class ImageProcessor;
 
 class PuzzleImageProvider : public QQuickImageProvider
 {
@@ -24,7 +25,8 @@ public:
 
 private:
     QImage loadPuzzleImage(int puzzleId, int slotIndex) const;
-    QImage loadHiddenPuzzleImage(int puzzleId) const;
+    QImage loadHiddenPuzzleImage(int puzzleId, const QVector<int> &revealedMaskNumbers = {}) const;
+    QVector<MaskLayer> maskLayersForPuzzle(int puzzleId) const;
 
     DatabaseManager *m_database = nullptr;
     ImageProcessor *m_imageProcessor = nullptr;
