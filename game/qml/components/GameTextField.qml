@@ -7,12 +7,17 @@ Item {
     id: control
 
     property string placeholderText: ""
+    property string prefixText: ""
     property string text: ""
     property alias readOnly: field.readOnly
 
     property bool fillWidth: true
     property bool trailingAction: false
     property bool autosaveOnFocusLost: false
+    property int horizontalAlignment: Text.AlignLeft
+    readonly property bool hasPrefix: control.prefixText.length > 0
+
+    readonly property alias inputActiveFocus: field.activeFocus
 
     signal textEdited(string text)
     signal trailingActionClicked()
@@ -36,11 +41,16 @@ Item {
             scope.requestSave()
     }
 
-    implicitWidth: 280
+    function commitInput() {
+        control.text = field.text
+        control.textEdited(field.text)
+    }
+
+    implicitWidth: Theme.w * 0.35
     implicitHeight: Theme.buttonHeight
 
     onTextChanged: {
-        if (!field.activeFocus && field.text !== control.text)
+        if (field.text !== control.text)
             field.text = control.text
     }
 
@@ -51,16 +61,69 @@ Item {
         border.color: field.activeFocus ? Theme.primary : Theme.secondary
         border.width: Theme.borderWidth
 
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.left: parent.left
+        Row {
+            id: inputRow
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.left: control.horizontalAlignment === Text.AlignHCenter ? undefined : parent.left
             anchors.right: trailingBtn.visible ? trailingBtn.left : parent.right
-            anchors.leftMargin: Theme.spacing
+            anchors.horizontalCenter: control.horizontalAlignment === Text.AlignHCenter ? parent.horizontalCenter : undefined
+            anchors.leftMargin: control.horizontalAlignment === Text.AlignHCenter ? 0 : Theme.spacing
             anchors.rightMargin: Theme.spacing
-            visible: field.text.length === 0 && !field.activeFocus
-            text: control.placeholderText
-            color: Theme.textSecondary
-            font.pixelSize: Theme.fontSizeBody
+            spacing: Theme.spacing * 0.45
+            width: control.horizontalAlignment === Text.AlignHCenter
+                   ? Math.min(implicitWidth, trailingBtn.visible ? parent.width - trailingBtn.width - Theme.spacing : parent.width)
+                   : undefined
+
+            Text {
+                id: prefixLabel
+                visible: control.hasPrefix
+                text: control.prefixText
+                color: Theme.gold
+                font.pixelSize: Theme.fontSizeBody
+                font.bold: true
+            }
+
+            Item {
+                width: control.hasPrefix ? Math.max(0, inputRow.width - prefixLabel.width - inputRow.spacing) : inputRow.width
+                height: parent.height
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    visible: field.text.length === 0 && !field.activeFocus
+                    text: control.placeholderText
+                    color: Theme.textSecondary
+                    font.pixelSize: Theme.fontSizeBody
+                    horizontalAlignment: control.hasPrefix ? Text.AlignLeft : control.horizontalAlignment
+                }
+
+                TextInput {
+                    id: field
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: control.hasPrefix ? Text.AlignLeft : control.horizontalAlignment
+                    color: Theme.textPrimary
+                    font.pixelSize: Theme.fontSizeBody
+                    clip: true
+                    selectByMouse: true
+                    onTextEdited: {
+                        control.text = text
+                        control.textEdited(text)
+                    }
+                    onActiveFocusChanged: {
+                        if (!activeFocus) {
+                            control.commitInput()
+                            control.focusLost()
+                            control.notifyAutosave()
+                        }
+                    }
+                }
+            }
         }
 
         Item {
@@ -100,33 +163,5 @@ Item {
             }
         }
 
-        TextInput {
-            id: field
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            anchors.left: parent.left
-            anchors.right: trailingBtn.visible ? trailingBtn.left : parent.right
-            anchors.leftMargin: Theme.spacing
-            anchors.rightMargin: trailingBtn.visible ? Theme.spacing * 0.35 : Theme.spacing
-            verticalAlignment: Text.AlignVCenter
-            color: Theme.textPrimary
-            font.pixelSize: Theme.fontSizeBody
-            clip: true
-            selectByMouse: true
-            onTextEdited: control.textEdited(text)
-            onActiveFocusChanged: {
-                if (!activeFocus) {
-                    control.focusLost()
-                    control.notifyAutosave()
-                }
-            }
-        }
-
-        Binding {
-            target: field
-            property: "text"
-            value: control.text
-            when: !field.activeFocus
-        }
     }
 }

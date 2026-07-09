@@ -6,7 +6,7 @@ Item {
 
     required property Item imageItem
     property bool active: true
-    property real minDragPixels: 12
+    property real minDragPixels: Theme.spacing * 1.5
     property bool selecting: false
     readonly property bool pointerLocked: selecting || regionDrag.active
 
@@ -146,13 +146,13 @@ Item {
         radius: 3
         color: "#33FFD700"
         border.color: Theme.gold
-        border.width: 2
+        border.width: Theme.borderWidth * 2
         z: 3
 
         Text {
             anchors.bottom: parent.top
             anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottomMargin: 4
+            anchors.bottomMargin: Theme.spacing
             visible: regionDrag.active
             text: adminViewModel.label("ui.editor.region_drag_hint")
             color: Theme.gold
@@ -170,7 +170,7 @@ Item {
         radius: 3
         color: "#22FFFFFF"
         border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.85)
-        border.width: 2
+        border.width: Theme.borderWidth * 2
         z: 3
     }
 }

@@ -48,12 +48,6 @@ QString parseHybridAnimStyleFromCorrectOrder(const QString &correctOrderJson)
 }
 } // namespace
 
-struct PuzzleSaveOutcome {
-    int puzzleId = 0;
-    bool success = false;
-    QString errorMessage;
-};
-
 QString AdminViewModel::maskContour() const
 {
     if (m_editorMasks.isEmpty()) {
@@ -1398,24 +1392,10 @@ void AdminViewModel::queuePuzzleSave(PuzzleSaveSnapshot snapshot, bool userIniti
     }
 
     setPuzzleSavingBusy(true);
-    DatabaseManager *database = m_database;
-
-    auto *watcher = new QFutureWatcher<PuzzleSaveOutcome>(this);
-    connect(watcher, &QFutureWatcher<PuzzleSaveOutcome>::finished, this, [this, watcher, userInitiated]() {
-        const PuzzleSaveOutcome outcome = watcher->result();
-        watcher->deleteLater();
-        setPuzzleSavingBusy(false);
-        onPuzzleSaveFinished(outcome.puzzleId,
-                             outcome.success,
-                             userInitiated,
-                             outcome.errorMessage);
-    });
-    watcher->setFuture(QtConcurrent::run([database, snapshot]() -> PuzzleSaveOutcome {
-        PuzzleSaveOutcome outcome;
-        outcome.puzzleId = snapshot.puzzleId;
-        outcome.success = AdminViewModel::persistPuzzleSnapshot(database, snapshot, &outcome.errorMessage);
-        return outcome;
-    }));
+    QString errorMessage;
+    const bool success = AdminViewModel::persistPuzzleSnapshot(m_database, snapshot, &errorMessage);
+    setPuzzleSavingBusy(false);
+    onPuzzleSaveFinished(snapshot.puzzleId, success, userInitiated, errorMessage);
 }
 
 void AdminViewModel::onPuzzleSaveFinished(int puzzleId,

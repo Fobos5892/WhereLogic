@@ -7,12 +7,14 @@ Item {
 
     Column {
         anchors.centerIn: parent
-        width: Math.min(parent.width * 0.8, 640)
+        width: parent.width * 0.8
         spacing: Theme.spacing * 2
 
         Text {
             width: parent.width
-            text: gameViewModel.label("ui.victory.title")
+            text: gameViewModel.totalScoreTeamA === gameViewModel.totalScoreTeamB
+                  ? gameViewModel.label("ui.victory.title_tie")
+                  : gameViewModel.label("ui.victory.title")
             color: Theme.gold
             font.pixelSize: Theme.fontSizeHero
             font.bold: true
@@ -21,9 +23,11 @@ Item {
 
         Text {
             width: parent.width
-            text: gameViewModel.totalScoreTeamA >= gameViewModel.totalScoreTeamB
-                  ? gameViewModel.teamAName
-                  : gameViewModel.teamBName
+            text: gameViewModel.totalScoreTeamA === gameViewModel.totalScoreTeamB
+                  ? gameViewModel.label("ui.victory.tie")
+                  : (gameViewModel.totalScoreTeamA > gameViewModel.totalScoreTeamB
+                     ? gameViewModel.teamAName
+                     : gameViewModel.teamBName)
             color: Theme.primary
             font.pixelSize: Theme.fontSizeTitle
             font.bold: true

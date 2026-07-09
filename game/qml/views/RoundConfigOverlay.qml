@@ -333,17 +333,14 @@ Rectangle {
                                 font.pixelSize: Theme.fontSizeCaption
                             }
 
-                            SettingsTextField {
+                            EditorBoundField {
                                 id: firstMainField
                                 width: parent.width
                                 fillWidth: true
                                 visible: root.textOnlyRound
+                                reloadKey: adminViewModel.selectedPuzzleId
+                                readValue: function() { return adminViewModel.hostHintAt(0) }
                                 placeholderText: adminViewModel.label("ui.editor.question_placeholder")
-                                text: {
-                                    adminViewModel.selectedPuzzleId
-                                    adminViewModel.editHint
-                                    return adminViewModel.hostHintAt(0)
-                                }
                                 onTextEdited: function(t) { adminViewModel.setHostHintAt(0, t) }
                                 onFocusLost: {
                                     const normalized = root.ensureQuestionMark(text)
@@ -360,15 +357,13 @@ Rectangle {
                                 font.pixelSize: Theme.fontSizeCaption
                             }
 
-                            SettingsTextField {
+                            EditorBoundField {
                                 width: parent.width
                                 fillWidth: true
                                 visible: root.textOnlyRound
+                                reloadKey: adminViewModel.selectedPuzzleId
+                                readValue: function() { return adminViewModel.editAnswer }
                                 placeholderText: adminViewModel.label("ui.editor.answer")
-                                text: {
-                                    adminViewModel.selectedPuzzleId
-                                    return adminViewModel.editAnswer
-                                }
                                 onTextEdited: function(t) { adminViewModel.editAnswer = t }
                             }
 
@@ -380,16 +375,13 @@ Rectangle {
                                 font.pixelSize: Theme.fontSizeCaption
                             }
 
-                            SettingsTextField {
+                            EditorBoundField {
                                 width: parent.width
                                 fillWidth: true
                                 visible: root.textOnlyRound
+                                reloadKey: adminViewModel.selectedPuzzleId
+                                readValue: function() { return adminViewModel.hostHintAt(1) }
                                 placeholderText: adminViewModel.label("ui.editor.hint_2_placeholder")
-                                text: {
-                                    adminViewModel.selectedPuzzleId
-                                    adminViewModel.editHint
-                                    return adminViewModel.hostHintAt(1)
-                                }
                                 onTextEdited: function(t) { adminViewModel.setHostHintAt(1, t) }
                             }
 
@@ -405,14 +397,12 @@ Rectangle {
                             Repeater {
                                 model: adminViewModel.configTextSlotCount
 
-                                SettingsTextField {
+                                EditorBoundField {
                                     width: contentCol.width
                                     fillWidth: true
+                                    reloadKey: adminViewModel.selectedPuzzleId
+                                    readValue: function() { return adminViewModel.cardTextAt(index) }
                                     placeholderText: adminViewModel.cardTextPlaceholder(index)
-                                    text: {
-                                        adminViewModel.selectedPuzzleId
-                                        return adminViewModel.cardTextAt(index)
-                                    }
                                     onTextEdited: function(t) { adminViewModel.setCardTextAt(index, t) }
                                     onFocusLost: {
                                         if (!root.textOnlyRound)
@@ -500,15 +490,16 @@ Rectangle {
                                             onClicked: adminViewModel.removeMaskAt(index)
                                         }
 
-                                        SettingsTextField {
+                                        EditorBoundField {
                                             id: maskAnswerField
                                             anchors.left: parent.left
                                             anchors.right: removeMaskButton.left
                                             anchors.rightMargin: Theme.spacing
                                             anchors.verticalCenter: removeMaskButton.verticalCenter
                                             fillWidth: true
+                                            reloadKey: adminViewModel.selectedPuzzleId
+                                            readValue: function() { return adminViewModel.maskAnswerAt(index) }
                                             placeholderText: adminViewModel.label("ui.editor.mask_answer_placeholder")
-                                            text: adminViewModel.maskAnswerAt(index)
                                             onTextEdited: function(t) { adminViewModel.setMaskAnswerAt(index, t) }
                                         }
                                     }
@@ -545,7 +536,7 @@ Rectangle {
 
                             Rectangle {
                                 width: parent.width
-                                height: 280
+                                height: parent.width * Theme.cardAspect
                                 radius: Theme.radius
                                 color: Theme.surfaceAlt
                                 visible: adminViewModel.hasPreviewImage
@@ -590,8 +581,8 @@ Rectangle {
                                 Image {
                                     id: previewSpinner
                                     anchors.centerIn: parent
-                                    width: 48
-                                    height: 48
+                                    width: Theme.iconLg * 1.5
+                                    height: width
                                     z: 0
                                     visible: adminViewModel.maskProcessing && !root.maskPointerLocked
                                     source: "qrc:/qml/assets/spinner.svg"
@@ -600,7 +591,7 @@ Rectangle {
                                     RotationAnimation on rotation {
                                         from: 0
                                         to: 360
-                                        duration: 850
+                                        duration: Theme.animNormal * 2
                                         loops: Animation.Infinite
                                         running: previewSpinner.visible
                                     }
@@ -686,15 +677,13 @@ Rectangle {
                         }
                     }
 
-                    SettingsTextField {
+                    EditorBoundField {
                         width: parent.width
                         fillWidth: true
                         visible: !root.useAnswerOptionsMode
+                        reloadKey: adminViewModel.selectedPuzzleId
+                        readValue: function() { return adminViewModel.editAnswer }
                         placeholderText: adminViewModel.label("ui.editor.answer")
-                        text: {
-                            adminViewModel.selectedPuzzleId
-                            return adminViewModel.editAnswer
-                        }
                         onTextEdited: function(t) { adminViewModel.editAnswer = t }
                     }
                 }
@@ -735,15 +724,15 @@ Rectangle {
                             width: optionsCol.width
                             spacing: Theme.spacing
 
-                            SettingsTextField {
+                            EditorBoundField {
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
                                 readOnly: adminViewModel.isPhotoMaskRound && adminViewModel.masksAutoGroupAnswers
+                                reloadKey: adminViewModel.isPhotoMaskRound && adminViewModel.masksAutoGroupAnswers
+                                           ? adminViewModel.selectedPuzzleId * 1000 + adminViewModel.maskEntryCount
+                                           : adminViewModel.selectedPuzzleId
+                                readValue: function() { return adminViewModel.answerOptionAt(index) }
                                 placeholderText: adminViewModel.answerOptionPlaceholder()
-                                text: {
-                                    adminViewModel.selectedPuzzleId
-                                    return adminViewModel.answerOptionAt(index)
-                                }
                                 onTextEdited: function(t) {
                                     if (!adminViewModel.isPhotoMaskRound || !adminViewModel.masksAutoGroupAnswers) {
                                         adminViewModel.setAnswerOptionAt(index, t)
@@ -819,15 +808,12 @@ Rectangle {
                     width: contentCol.width
                     spacing: Theme.spacing
 
-                    SettingsTextField {
+                    EditorBoundField {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
+                        reloadKey: adminViewModel.selectedPuzzleId
+                        readValue: function() { return adminViewModel.hostHintAt(index) }
                         placeholderText: adminViewModel.label("ui.editor.host_hint_format").arg(index + 1)
-                        text: {
-                            adminViewModel.selectedPuzzleId
-                            adminViewModel.editHint
-                            return adminViewModel.hostHintAt(index)
-                        }
                         onTextEdited: function(t) { adminViewModel.setHostHintAt(index, t) }
                     }
 

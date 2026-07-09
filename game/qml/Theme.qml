@@ -8,9 +8,10 @@ QtObject {
 
     readonly property real refW: 960
     readonly property real refH: 540
-    readonly property real scale: window
-        ? Math.min(window.width / refW, window.height / refH)
-        : 1.0
+
+    readonly property real w: window ? window.width : refW
+    readonly property real h: window ? window.height : refH
+    readonly property real scale: Math.min(w / refW, h / refH)
 
     // «Где Логика?» palette
     readonly property color background: "#0B0C10"
@@ -28,24 +29,27 @@ QtObject {
     readonly property color cardFront: "#E8EDF2"
     readonly property color glowCyan: "#4066FCF1"
 
-    readonly property int touchMin: Math.max(32, Math.round(40 * scale))
-    readonly property int buttonHeight: Math.max(34, Math.round(42 * scale))
-    readonly property int margin: Math.max(8, Math.round(14 * scale))
-    readonly property int spacing: Math.max(6, Math.round(9 * scale))
-    readonly property int radius: Math.max(6, Math.round(8 * scale))
-    readonly property int borderWidth: Math.max(1, Math.round(2 * scale))
+    readonly property int touchMin: Math.round(h * 0.04)
+    readonly property int buttonHeight: Math.round(h * 0.052)
+    readonly property int margin: Math.round(w * 0.013)
+    readonly property int spacing: Math.round(w * 0.009)
+    readonly property int radius: Math.round(w * 0.008)
+    readonly property int borderWidth: Math.max(1, Math.round(w * 0.0015))
 
-    readonly property int fontSizeHero: Math.max(26, Math.round(34 * scale))
-    readonly property int fontSizeTitle: Math.max(18, Math.round(22 * scale))
-    readonly property int fontSizeBody: Math.max(13, Math.round(16 * scale))
-    readonly property int fontSizeCaption: Math.max(11, Math.round(12 * scale))
-    readonly property int fontSizeButton: Math.max(12, Math.round(15 * scale))
+    readonly property int fontSizeHero: Math.round(h * 0.045)
+    readonly property int fontSizeTitle: Math.round(h * 0.03)
+    readonly property int fontSizeBody: Math.round(h * 0.022)
+    readonly property int fontSizeCaption: Math.round(h * 0.017)
+    readonly property int fontSizeButton: Math.round(h * 0.021)
 
-    readonly property int iconSm: Math.max(14, Math.round(16 * scale))
-    readonly property int iconMd: Math.max(18, Math.round(20 * scale))
-    readonly property int iconLg: Math.max(20, Math.round(24 * scale))
-    readonly property int slotSize: Math.max(56, Math.round(68 * scale))
-    readonly property int chromeSize: Math.max(28, Math.round(34 * scale))
+    readonly property int iconSm: Math.round(h * 0.022)
+    readonly property int iconMd: Math.round(h * 0.028)
+    readonly property int iconLg: Math.round(h * 0.033)
+    readonly property int slotSize: Math.round(h * 0.09)
+    readonly property int chromeSize: Math.round(h * 0.056)
+    readonly property int topBarHeight: chromeSize + spacing * 2
+    readonly property real cardAspect: 1.56
+    readonly property real cardImageMargin: spacing * 0.35
 
     readonly property int animFast: 150
     readonly property int animNormal: 400

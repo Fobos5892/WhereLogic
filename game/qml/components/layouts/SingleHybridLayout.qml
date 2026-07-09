@@ -26,9 +26,24 @@ Item {
         revealSequence.start()
     }
 
+    function scheduleRevealAnimation() {
+        revealArmTimer.restart()
+    }
+
+    Timer {
+        id: revealArmTimer
+        interval: 50
+        repeat: false
+        onTriggered: {
+            if (root.revealReady && root.width > 0 && root.height > 0) {
+                root.startRevealAnimation()
+            }
+        }
+    }
+
     onRevealReadyChanged: {
         if (revealReady) {
-            startRevealAnimation()
+            scheduleRevealAnimation()
         } else {
             resetRevealAnimation()
         }
@@ -36,7 +51,7 @@ Item {
 
     Component.onCompleted: {
         if (revealReady) {
-            startRevealAnimation()
+            scheduleRevealAnimation()
         }
     }
 
@@ -82,16 +97,28 @@ Item {
         border.width: Theme.borderWidth
     }
 
+    readonly property real stageCardWidth: {
+        if (width <= 0 || height <= 0)
+            return Theme.slotSize * 2.4
+        const maxByHeight = height * 0.92
+        const maxByWidth = (width - Theme.spacing * 3) * 0.44
+        return Math.max(Theme.slotSize * 1.8,
+                        Math.min(maxByWidth, maxByHeight * Theme.cardAspect))
+    }
+    readonly property real stageCardHeight: stageCardWidth / Theme.cardAspect
+
     Item {
         id: stage
-        anchors.fill: parent
-        anchors.margins: Theme.spacing
+        anchors.centerIn: parent
+        width: parent.width - Theme.spacing * 2
+        height: parent.height - Theme.spacing * 2
         clip: true
 
         Rectangle {
             readonly property real centerX: (stage.width - width) * 0.5
-            width: stage.width * 0.46
-            height: stage.height
+            width: root.stageCardWidth
+            height: root.stageCardHeight
+            anchors.verticalCenter: parent.verticalCenter
             radius: Theme.radius
             color: Theme.cardFront
             border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.55)
@@ -112,8 +139,9 @@ Item {
 
         Rectangle {
             readonly property real centerX: (stage.width - width) * 0.5
-            width: stage.width * 0.46
-            height: stage.height
+            width: root.stageCardWidth
+            height: root.stageCardHeight
+            anchors.verticalCenter: parent.verticalCenter
             x: centerX + centerX * root.splitProgress
             radius: Theme.radius
             color: Theme.cardFront
@@ -134,7 +162,9 @@ Item {
 
         Image {
             id: mergedImage
-            anchors.fill: parent
+            anchors.centerIn: parent
+            width: root.stageCardWidth
+            height: root.stageCardHeight
             source: root.mergedUrl
             fillMode: Image.PreserveAspectFit
             cache: false

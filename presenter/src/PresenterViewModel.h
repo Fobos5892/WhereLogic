@@ -14,6 +14,7 @@ class PresenterViewModel : public QObject
     Q_PROPERTY(QString serverHost READ serverHost WRITE setServerHost NOTIFY serverHostChanged)
     Q_PROPERTY(QString pin READ pin WRITE setPin NOTIFY pinChanged)
     Q_PROPERTY(QString roundTitle READ roundTitle NOTIFY roundTitleChanged)
+    Q_PROPERTY(QString roundRule READ roundRule NOTIFY roundRuleChanged)
     Q_PROPERTY(int puzzleNum READ puzzleNum NOTIFY puzzleNumChanged)
     Q_PROPERTY(QString activeTeam READ activeTeam NOTIFY activeTeamChanged)
     Q_PROPERTY(QString gameStage READ gameStage NOTIFY gameStageChanged)
@@ -31,6 +32,7 @@ public:
     QString serverHost() const { return m_serverHost; }
     QString pin() const { return m_pin; }
     QString roundTitle() const { return m_roundTitle; }
+    QString roundRule() const { return m_roundRule; }
     int puzzleNum() const { return m_puzzleNum; }
     QString activeTeam() const { return m_activeTeam; }
     QString gameStage() const { return m_gameStage; }
@@ -58,6 +60,7 @@ signals:
     void serverHostChanged();
     void pinChanged();
     void roundTitleChanged();
+    void roundRuleChanged();
     void puzzleNumChanged();
     void activeTeamChanged();
     void gameStageChanged();
@@ -85,6 +88,7 @@ private:
     QString m_serverHost;
     QString m_pin;
     QString m_roundTitle;
+    QString m_roundRule;
     int m_puzzleNum = 0;
     QString m_activeTeam;
     QString m_gameStage;

@@ -6,7 +6,7 @@ Item {
 
     Column {
         anchors.centerIn: parent
-        width: Math.min(parent.width * 0.85, 640)
+        width: parent.width * 0.85
         spacing: Theme.spacing * 2
 
         Item {
@@ -78,7 +78,7 @@ Item {
                 anchors.top: titleBlock.bottom
                 anchors.topMargin: Theme.spacing * 0.55
                 anchors.horizontalCenter: parent.horizontalCenter
-                width: Math.min(parent.width * 0.72, titleMain.implicitWidth * 1.2)
+                width: parent.width * 0.72
                 height: Theme.spacing * 1.6
 
                 Rectangle {
@@ -130,7 +130,7 @@ Item {
                         Rectangle {
                             y: parent.height * 0.12
                             height: parent.height * 0.76
-                            width: Math.max(3, glowBed.width * 0.045)
+                            width: Math.max(Theme.borderWidth * 2, glowBed.width * 0.045)
                             radius: width / 2
                             x: -width
 
@@ -178,7 +178,7 @@ Item {
             wrapMode: Text.WordWrap
         }
 
-        Item { width: 1; height: Theme.spacing }
+        Item { width: Theme.borderWidth; height: Theme.spacing }
 
         GameButton {
             anchors.horizontalCenter: parent.horizontalCenter

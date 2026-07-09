@@ -8,6 +8,7 @@
 #include <QStringList>
 #include <QVector>
 
+#include "../core/GameConstants.h"
 #include "../models/DatabaseManager.h"
 
 class DatabaseManager;
@@ -24,11 +25,16 @@ class GameViewModel : public QObject
     Q_PROPERTY(QString ruleText READ ruleText NOTIFY ruleTextChanged)
     Q_PROPERTY(int puzzleNumber READ puzzleNumber NOTIFY puzzleNumberChanged)
     Q_PROPERTY(int timerSeconds READ timerSeconds NOTIFY timerChanged)
+    Q_PROPERTY(int displayTimerSeconds READ displayTimerSeconds NOTIFY timerChanged)
     Q_PROPERTY(int timerMilliseconds READ timerMilliseconds NOTIFY timerChanged)
     Q_PROPERTY(bool showMilliseconds READ showMilliseconds NOTIFY timerChanged)
+    Q_PROPERTY(bool gracePeriodActive READ gracePeriodActive NOTIFY gracePeriodChanged)
     Q_PROPERTY(QString activeTeam READ activeTeam NOTIFY activeTeamChanged)
     Q_PROPERTY(int roundScoreTeamA READ roundScoreTeamA NOTIFY roundScoreChanged)
     Q_PROPERTY(int roundScoreTeamB READ roundScoreTeamB NOTIFY roundScoreChanged)
+    Q_PROPERTY(int maxRoundStars READ maxRoundStars NOTIFY roundScoreChanged)
+    Q_PROPERTY(int currentRoundNumber READ currentRoundNumber NOTIFY roundProgressChanged)
+    Q_PROPERTY(int totalRounds READ totalRounds NOTIFY roundProgressChanged)
     Q_PROPERTY(QString teamAName READ teamAName NOTIFY teamsChanged)
     Q_PROPERTY(QString teamBName READ teamBName NOTIFY teamsChanged)
     Q_PROPERTY(int totalScoreTeamA READ totalScoreTeamA NOTIFY teamsChanged)
@@ -70,11 +76,22 @@ public:
     QString ruleText() const { return m_ruleText; }
     int puzzleNumber() const { return m_puzzleNumber; }
     int timerSeconds() const { return m_timerSeconds; }
+    int displayTimerSeconds() const
+    {
+        if (m_stage == GameConstants::Stage::ClosedCards) {
+            return m_isStealTurn ? m_stealTimerSeconds : m_baseTimerSeconds;
+        }
+        return m_timerSeconds;
+    }
     int timerMilliseconds() const { return m_timerMilliseconds; }
     bool showMilliseconds() const { return m_showMilliseconds; }
+    bool gracePeriodActive() const { return m_gracePeriodActive; }
     QString activeTeam() const { return m_activeTeam; }
     int roundScoreTeamA() const { return m_roundScoreTeamA; }
     int roundScoreTeamB() const { return m_roundScoreTeamB; }
+    int maxRoundStars() const { return GameConstants::MAX_ROUND_STARS; }
+    int currentRoundNumber() const { return m_roundIndex + 1; }
+    int totalRounds() const { return m_rounds.size(); }
     QString teamAName() const { return m_teamAName; }
     QString teamBName() const { return m_teamBName; }
     int totalScoreTeamA() const { return m_totalScoreTeamA; }
@@ -121,6 +138,7 @@ public:
     Q_INVOKABLE void rejectAll();
     Q_INVOKABLE void finishMissingReveal();
     Q_INVOKABLE void advanceAfterRound();
+    Q_INVOKABLE void confirmRoundEnd();
     Q_INVOKABLE void revealNextHint();
 
     Q_INVOKABLE QString label(const QString &key) const;
@@ -139,8 +157,10 @@ signals:
     void ruleTextChanged();
     void puzzleNumberChanged();
     void timerChanged();
+    void gracePeriodChanged();
     void activeTeamChanged();
     void roundScoreChanged();
+    void roundProgressChanged();
     void teamsChanged();
     void remoteConnectedChanged(bool connected);
     void showLocalControlsChanged(bool visible);
@@ -163,8 +183,12 @@ signals:
     void gameFinished();
 
 private:
+    int layoutImageSlotCount() const;
+    QStringList preparedAnswerList() const;
     void loadPersistedState();
     void persistState();
+    void reloadTeamsFromDatabase();
+    int resolvePuzzleIndex(const QVector<PuzzleInfo> &puzzles, int savedPuzzleId) const;
     void setStage(const QString &stage);
     void setSubState(const QString &subState);
     void setRemoteConnected(bool connected);
@@ -174,13 +198,20 @@ private:
     void resetPuzzlePresentation();
     void startMainTimer();
     void startStealTimer();
+    void startGracePeriod();
+    void finishGracePeriod();
     void stopTimer();
     void onTimerTick();
     void evaluateAnswer(const QString &answer);
     void enterMissingReveal(bool wasCorrect);
     void enterResolution();
     void awardPointToActiveTeam();
+    void settleRoundScores();
+    bool shouldEndRoundEarly() const;
+    bool tryCompleteRoundEarly();
+    void proceedAfterScoring();
     void advancePuzzleOrRound();
+    void finishGameVictory();
     void buildAnswerGroups();
     bool allMaskGroupsRevealed() const;
     int findAnswerGroupIndex(const QString &answer) const;
@@ -192,6 +223,15 @@ private:
     QString hiddenImageUrlSuffix() const;
     QString normalizeAnswer(const QString &answer) const;
     QString activeTeamIdLabel() const;
+    void applyPersistedTurnState();
+    QString mainTeamForPuzzle(int puzzleNumber) const;
+    QString opponentTeam(const QString &team) const;
+    void setActiveTeamForMainTurn();
+    void setActiveTeamForStealTurn();
+    QString primaryCorrectAnswer() const;
+    QStringList acceptedAnswers() const;
+    bool matchesAcceptedAnswer(const QString &answer) const;
+    void loadAnswerOptionsFromPuzzle(const PuzzleInfo &puzzle);
 
     DatabaseManager *m_database = nullptr;
     NetworkServer *m_networkServer = nullptr;
@@ -221,6 +261,7 @@ private:
     QString m_revealedAnswer;
     QString m_hintText;
     QString m_correctAnswer;
+    QStringList m_answerOptions;
     QVector<PuzzleMaskInfo> m_puzzleMasks;
     QList<int> m_revealedMaskNumbers;
 
@@ -238,10 +279,12 @@ private:
     bool m_hintUnlockReady = false;
 
     int m_puzzleNumber = 0;
+    int m_puzzleImageRevision = 0;
     int m_timerSeconds = 0;
     int m_timerMilliseconds = 0;
     int m_baseTimerSeconds = 60;
     int m_stealTimerSeconds = 15;
+    bool m_gracePeriodActive = false;
     bool m_showMilliseconds = false;
     bool m_isStealTurn = false;
     bool m_remoteConnected = false;
@@ -255,4 +298,5 @@ private:
     int m_roundScoreTeamB = 0;
     int m_totalScoreTeamA = 0;
     int m_totalScoreTeamB = 0;
+    int m_lastSettledRoundIndex = -1;
 };

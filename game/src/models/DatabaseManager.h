@@ -130,6 +130,8 @@ public:
     bool saveGameState(const GameStateSnapshot &state);
 
     QByteArray puzzleImageData(int puzzleId, int slotIndex) const;
+    Q_INVOKABLE QByteArray fetchPuzzleImageData(int puzzleId, int slotIndex) const;
+    int canonicalPuzzleId(int puzzleId) const;
     bool upsertPuzzleImage(int puzzleId, int slotIndex, const QByteArray &imageData);
 
 signals:
@@ -145,6 +147,10 @@ private:
     bool repairStoredTextEncoding();
     bool removeDuplicatePresets();
     bool syncUiDefaultsToDatabase();
+    bool normalizePuzzleHintKeys();
+    bool repairDuplicatePuzzles();
+    int puzzleImageSlotCount(int puzzleId) const;
+    int canonicalPuzzleIdUnlocked(int puzzleId) const;
     bool insertCatalogRound(int id,
                             const QString &titleKey,
                             const QString &ruleKey,

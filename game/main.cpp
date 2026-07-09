@@ -1,9 +1,7 @@
-#include "models/AiRuntimeManager.h"
 #include "models/AudioSettings.h"
 #include "models/DatabaseManager.h"
 #include "models/ImageProcessor.h"
 #include "models/NetworkServer.h"
-#include "models/VoiceRecognizer.h"
 #include "models/PuzzleImageProvider.h"
 #include "viewmodels/AdminViewModel.h"
 #include "viewmodels/GameViewModel.h"
@@ -11,10 +9,12 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QMetaType>
 
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+    qRegisterMetaType<QByteArray>("QByteArray");
     app.setOrganizationName(QStringLiteral("WhereLogic"));
     app.setApplicationName(QStringLiteral("WhereLogicGame"));
 
@@ -27,8 +27,6 @@ int main(int argc, char *argv[])
     AdminViewModel adminViewModel(&database);
     NetworkServer networkServer;
     ImageProcessor imageProcessor;
-    VoiceRecognizer voiceRecognizer;
-    AiRuntimeManager aiRuntime;
     AudioSettings audioSettings;
     PuzzleImageProvider puzzleImageProvider(&database);
 
@@ -51,8 +49,6 @@ int main(int argc, char *argv[])
     context->setContextProperty(QStringLiteral("adminViewModel"), &adminViewModel);
     context->setContextProperty(QStringLiteral("networkServer"), &networkServer);
     context->setContextProperty(QStringLiteral("imageProcessor"), &imageProcessor);
-    context->setContextProperty(QStringLiteral("voiceRecognizer"), &voiceRecognizer);
-    context->setContextProperty(QStringLiteral("aiRuntime"), &aiRuntime);
     context->setContextProperty(QStringLiteral("audioSettings"), &audioSettings);
 
     QObject::connect(

@@ -22,14 +22,14 @@ Item {
         Item {
             id: trackHost
             Layout.fillWidth: true
-            Layout.preferredHeight: 22
+            Layout.preferredHeight: Theme.buttonHeight * 0.55
 
             Rectangle {
                 id: track
                 anchors.verticalCenter: parent.verticalCenter
                 width: parent.width
-                height: 6
-                radius: 3
+                height: Theme.borderWidth * 3
+                radius: height * 0.5
                 color: Theme.surfaceAlt
 
                 Rectangle {
@@ -43,8 +43,8 @@ Item {
             Rectangle {
                 id: handle
                 y: (trackHost.height - height) / 2
-                width: 22
-                height: 22
+                width: Theme.buttonHeight * 0.55
+                height: width
                 radius: Theme.radius
                 color: Theme.gold
                 border.color: Theme.primary
@@ -120,7 +120,7 @@ Item {
             color: Theme.primary
             font.pixelSize: Theme.fontSizeCaption
             font.bold: true
-            Layout.preferredWidth: 48
+            Layout.preferredWidth: Theme.fontSizeBody * 3
             horizontalAlignment: Text.AlignRight
         }
     }

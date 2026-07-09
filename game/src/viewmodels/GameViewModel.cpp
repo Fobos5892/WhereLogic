@@ -10,12 +10,14 @@
 #include <QJsonDocument>
 #include <QHash>
 #include <QRegularExpression>
+#include <QCoreApplication>
 
 #include <algorithm>
 
 namespace {
 
 constexpr int kTimerTickMs = 100;
+constexpr int kGracePeriodSeconds = 10;
 const QString kHintDelimiter = QStringLiteral("||");
 const QLatin1String kHybridAnimPrefix("__hybrid_anim:");
 
@@ -55,11 +57,16 @@ GameViewModel::GameViewModel(DatabaseManager *database, QObject *parent)
     });
 
     loadPersistedState();
+
+    if (QCoreApplication *app = QCoreApplication::instance()) {
+        connect(app, &QCoreApplication::aboutToQuit, this, [this]() { persistState(); });
+    }
 }
 
 GameViewModel::~GameViewModel()
 {
     stopTimer();
+    persistState();
 }
 
 void GameViewModel::setNetworkServer(NetworkServer *server)
@@ -103,7 +110,10 @@ QString GameViewModel::puzzleImageUrl(int slotIndex) const
     if (m_state.puzzleId <= 0) {
         return {};
     }
-    return QStringLiteral("image://puzzle/%1/%2").arg(m_state.puzzleId).arg(slotIndex);
+    return QStringLiteral("image://puzzle/%1/%2?rev=%3")
+        .arg(m_state.puzzleId)
+        .arg(slotIndex)
+        .arg(m_puzzleImageRevision);
 }
 
 QString GameViewModel::puzzleHiddenImageUrl() const
@@ -113,9 +123,14 @@ QString GameViewModel::puzzleHiddenImageUrl() const
     }
     const QString suffix = hiddenImageUrlSuffix();
     if (suffix.isEmpty()) {
-        return QStringLiteral("image://puzzle/%1/hide").arg(m_state.puzzleId);
+        return QStringLiteral("image://puzzle/%1/hide?rev=%2")
+            .arg(m_state.puzzleId)
+            .arg(m_puzzleImageRevision);
     }
-    return QStringLiteral("image://puzzle/%1/hide/%2").arg(m_state.puzzleId).arg(suffix);
+    return QStringLiteral("image://puzzle/%1/hide/%2?rev=%3")
+        .arg(m_state.puzzleId)
+        .arg(suffix)
+        .arg(m_puzzleImageRevision);
 }
 
 QString GameViewModel::hiddenImageUrlSuffix() const
@@ -261,7 +276,7 @@ void GameViewModel::revealAnswerGroup(int groupIndex)
 QString GameViewModel::formatRevealDetail(int groupIndex) const
 {
     if (groupIndex < 0 || groupIndex >= m_answerGroups.size()) {
-        return m_correctAnswer;
+        return primaryCorrectAnswer();
     }
     const MaskAnswerGroup &group = m_answerGroups.at(groupIndex);
     QStringList parts;
@@ -284,7 +299,19 @@ QString GameViewModel::puzzleDisplayImageUrl(int slotIndex) const
 
 void GameViewModel::resumeSession()
 {
-    if (!m_hasActiveSession || m_presetId <= 0) {
+    if (!m_database) {
+        return;
+    }
+
+    m_state = m_database->loadGameState();
+    m_presetId = m_state.presetId;
+    reloadTeamsFromDatabase();
+
+    const bool hasPreset = m_presetId > 0;
+    const bool hasRounds = hasPreset && !m_database->listRoundsForPreset(m_presetId).isEmpty();
+    const bool hasTeams = m_teamAId > 0 && m_teamBId > 0;
+    m_hasActiveSession = m_state.activeSession && hasPreset && hasRounds && hasTeams;
+    if (!m_hasActiveSession) {
         return;
     }
 
@@ -293,6 +320,7 @@ void GameViewModel::resumeSession()
         return;
     }
 
+    m_roundIndex = 0;
     for (int i = 0; i < m_rounds.size(); ++i) {
         if (m_rounds.at(i).id == m_state.roundId) {
             m_roundIndex = i;
@@ -301,32 +329,55 @@ void GameViewModel::resumeSession()
     }
 
     loadCurrentRound();
-    const auto puzzles = m_database->listPuzzlesForRound(m_state.roundId);
-    m_currentPuzzles = puzzles;
-    for (int i = 0; i < puzzles.size(); ++i) {
-        if (puzzles.at(i).id == m_state.puzzleId) {
-            m_puzzleIndex = i;
-            break;
-        }
+    m_puzzleIndex = resolvePuzzleIndex(m_currentPuzzles, m_state.puzzleId);
+    if (m_puzzleIndex >= m_currentPuzzles.size()) {
+        m_puzzleIndex = qMax(0, m_currentPuzzles.size() - 1);
     }
 
     loadCurrentPuzzle();
     setStage(m_state.stage);
     setSubState(m_state.subState);
+    applyPersistedTurnState();
+
     m_roundScoreTeamA = m_state.roundScoreTeamA;
     m_roundScoreTeamB = m_state.roundScoreTeamB;
     emit roundScoreChanged();
+    emit teamsChanged();
 
     if (m_stage == GameConstants::Stage::MainTurn) {
-        m_cardsFaceUp = true;
-        emit cardsFaceUpChanged(true);
+        m_cardsFaceUp = false;
+        emit cardsFaceUpChanged(false);
         startMainTimer();
+        QTimer::singleShot(50, this, [this]() {
+            if (m_stage != GameConstants::Stage::MainTurn) {
+                return;
+            }
+            m_cardsFaceUp = true;
+            emit cardsFaceUpChanged(true);
+        });
     } else if (m_stage == GameConstants::Stage::StealTurn) {
-        m_cardsFaceUp = true;
+        m_cardsFaceUp = false;
+        emit cardsFaceUpChanged(false);
         m_isStealTurn = true;
-        emit cardsFaceUpChanged(true);
         startStealTimer();
+        QTimer::singleShot(50, this, [this]() {
+            if (m_stage != GameConstants::Stage::StealTurn) {
+                return;
+            }
+            m_cardsFaceUp = true;
+            emit cardsFaceUpChanged(true);
+        });
+    } else if (m_stage == GameConstants::Stage::ClosedCards) {
+        m_cardsFaceUp = false;
+        emit cardsFaceUpChanged(false);
     }
+
+    if (m_stage == GameConstants::Stage::InterRound
+        || m_stage == GameConstants::Stage::FinalVictory) {
+        m_lastSettledRoundIndex = m_roundIndex;
+    }
+
+    persistState();
 }
 
 void GameViewModel::clearSession()
@@ -342,6 +393,7 @@ void GameViewModel::clearSession()
     m_roundScoreTeamB = 0;
     m_totalScoreTeamA = 0;
     m_totalScoreTeamB = 0;
+    m_lastSettledRoundIndex = -1;
     m_teamAName.clear();
     m_teamBName.clear();
     resetPuzzlePresentation();
@@ -376,14 +428,17 @@ void GameViewModel::startGame(int presetId)
     m_roundScoreTeamB = 0;
     m_totalScoreTeamA = 0;
     m_totalScoreTeamB = 0;
+    m_lastSettledRoundIndex = -1;
     m_hasActiveSession = true;
     m_activeTeam = GameConstants::TEAM_A;
+    emit activeTeamChanged();
 
     setStage(GameConstants::Stage::TeamSetup);
     setSubState(GameConstants::SubState::AwaitingReady);
     emit hasActiveSessionChanged(true);
     emit currentPresetIdChanged();
     emit roundScoreChanged();
+    emit roundProgressChanged();
     persistState();
 }
 
@@ -410,9 +465,9 @@ void GameViewModel::configureTeams(const QString &teamA, const QString &teamB)
         m_teamBName = saved.at(1).name;
     }
 
-    m_activeTeam = GameConstants::TEAM_A;
     loadCurrentRound();
     loadCurrentPuzzle();
+    setActiveTeamForMainTurn();
     setStage(GameConstants::Stage::ClosedCards);
     setSubState(GameConstants::SubState::AwaitingReady);
     m_cardsFaceUp = false;
@@ -452,6 +507,10 @@ void GameViewModel::submitAnswer(const QString &text)
         return;
     }
 
+    if (m_gracePeriodActive) {
+        m_gracePeriodActive = false;
+        emit gracePeriodChanged();
+    }
     stopTimer();
     m_submittedAnswer = answer.trimmed();
     emit submittedAnswerChanged();
@@ -476,14 +535,19 @@ void GameViewModel::transferTurn()
         return;
     }
 
+    stopTimer();
+    if (m_gracePeriodActive) {
+        m_gracePeriodActive = false;
+        emit gracePeriodChanged();
+    }
+
     m_isStealTurn = true;
+    setActiveTeamForStealTurn();
     m_cardsFaceUp = false;
     emit cardsFaceUpChanged(false);
-    m_activeTeam = GameConstants::TEAM_B;
-    emit activeTeamChanged();
 
     setStage(GameConstants::Stage::ClosedCards);
-    setSubState(GameConstants::SubState::AwaitingReady);
+    setSubState(GameConstants::SubState::StealTurn);
     m_revealedAnswer.clear();
     emit revealedAnswerChanged();
     persistState();
@@ -491,28 +555,58 @@ void GameViewModel::transferTurn()
 
 void GameViewModel::resolveTeamA()
 {
-    if (m_stage != GameConstants::Stage::Resolution) {
+    const bool manualResolve = (m_stage == GameConstants::Stage::MainTurn
+                                || m_stage == GameConstants::Stage::StealTurn)
+                               && !m_userAnswer.trimmed().isEmpty();
+    if (m_stage != GameConstants::Stage::Resolution && !manualResolve) {
         return;
+    }
+    if (manualResolve) {
+        stopTimer();
+        m_submittedAnswer = m_userAnswer.trimmed();
+        emit submittedAnswerChanged();
+        m_userAnswer.clear();
+        emit userAnswerChanged();
     }
     m_activeTeam = GameConstants::TEAM_A;
     awardPointToActiveTeam();
-    advancePuzzleOrRound();
+    proceedAfterScoring();
 }
 
 void GameViewModel::resolveTeamB()
 {
-    if (m_stage != GameConstants::Stage::Resolution) {
+    const bool manualResolve = (m_stage == GameConstants::Stage::MainTurn
+                                || m_stage == GameConstants::Stage::StealTurn)
+                               && !m_userAnswer.trimmed().isEmpty();
+    if (m_stage != GameConstants::Stage::Resolution && !manualResolve) {
         return;
+    }
+    if (manualResolve) {
+        stopTimer();
+        m_submittedAnswer = m_userAnswer.trimmed();
+        emit submittedAnswerChanged();
+        m_userAnswer.clear();
+        emit userAnswerChanged();
     }
     m_activeTeam = GameConstants::TEAM_B;
     awardPointToActiveTeam();
-    advancePuzzleOrRound();
+    proceedAfterScoring();
 }
 
 void GameViewModel::rejectAll()
 {
-    if (m_stage != GameConstants::Stage::Resolution) {
+    const bool manualResolve = (m_stage == GameConstants::Stage::MainTurn
+                                || m_stage == GameConstants::Stage::StealTurn)
+                               && !m_userAnswer.trimmed().isEmpty();
+    if (m_stage != GameConstants::Stage::Resolution && !manualResolve) {
         return;
+    }
+    if (manualResolve) {
+        stopTimer();
+        m_submittedAnswer = m_userAnswer.trimmed();
+        emit submittedAnswerChanged();
+        m_userAnswer.clear();
+        emit userAnswerChanged();
     }
     advancePuzzleOrRound();
 }
@@ -536,7 +630,7 @@ void GameViewModel::finishMissingReveal()
         }
 
         awardPointToActiveTeam();
-        advancePuzzleOrRound();
+        proceedAfterScoring();
         return;
     }
 
@@ -556,11 +650,7 @@ void GameViewModel::advanceAfterRound()
 
     ++m_roundIndex;
     if (m_roundIndex >= m_rounds.size()) {
-        setStage(GameConstants::Stage::FinalVictory);
-        m_hasActiveSession = false;
-        emit hasActiveSessionChanged(false);
-        persistState();
-        emit gameFinished();
+        finishGameVictory();
         return;
     }
 
@@ -568,43 +658,129 @@ void GameViewModel::advanceAfterRound()
     m_roundScoreTeamB = 0;
     m_puzzleIndex = 0;
     m_isStealTurn = false;
-    m_activeTeam = GameConstants::TEAM_A;
-    emit activeTeamChanged();
     emit roundScoreChanged();
 
     loadCurrentRound();
     loadCurrentPuzzle();
+    setActiveTeamForMainTurn();
     setStage(GameConstants::Stage::ClosedCards);
     setSubState(GameConstants::SubState::AwaitingReady);
     m_cardsFaceUp = false;
     emit cardsFaceUpChanged(false);
+    emit roundProgressChanged();
     persistState();
+}
+
+int GameViewModel::layoutImageSlotCount() const
+{
+    if (m_layoutType == GameConstants::LayoutType::FullMask) {
+        return 1;
+    }
+    if (m_layoutType == GameConstants::LayoutType::TextOnly) {
+        return 0;
+    }
+    if (m_layoutType == GameConstants::LayoutType::SingleHybrid
+        || m_layoutType == GameConstants::LayoutType::Equation) {
+        return 3;
+    }
+    if (m_layoutType == GameConstants::LayoutType::Chronology
+        || m_layoutType == GameConstants::LayoutType::Standard) {
+        return 4;
+    }
+    if (m_layoutType == GameConstants::LayoutType::BlitzStandard) {
+        return 8;
+    }
+    return 4;
+}
+
+QStringList GameViewModel::preparedAnswerList() const
+{
+    if (m_layoutType == GameConstants::LayoutType::FullMask && !m_answerGroups.isEmpty()) {
+        QStringList answers;
+        answers.reserve(m_answerGroups.size());
+        for (const MaskAnswerGroup &group : m_answerGroups) {
+            const QString answer = group.answerText.trimmed();
+            if (!answer.isEmpty() && !answers.contains(answer, Qt::CaseInsensitive)) {
+                answers.append(answer);
+            }
+        }
+        return answers;
+    }
+
+    QStringList answers;
+    for (const QString &option : m_answerOptions) {
+        const QString trimmed = option.trimmed();
+        if (!trimmed.isEmpty() && !answers.contains(trimmed, Qt::CaseInsensitive)) {
+            answers.append(trimmed);
+        }
+    }
+    if (!answers.isEmpty()) {
+        return answers;
+    }
+
+    for (const QString &part : m_correctAnswer.split(QRegularExpression(QStringLiteral("[,;|]+")),
+                                                     Qt::SkipEmptyParts)) {
+        const QString trimmed = part.trimmed();
+        if (!trimmed.isEmpty() && !answers.contains(trimmed, Qt::CaseInsensitive)) {
+            answers.append(trimmed);
+        }
+    }
+    if (answers.isEmpty() && !m_correctAnswer.trimmed().isEmpty()) {
+        answers.append(m_correctAnswer.trimmed());
+    }
+    return answers;
 }
 
 QJsonObject GameViewModel::currentPuzzlePayload() const
 {
     QJsonObject payload;
     payload.insert(QStringLiteral("round_title"), m_roundTitle);
+    payload.insert(QStringLiteral("round_rule"), m_ruleText);
     payload.insert(QStringLiteral("puzzle_num"), m_puzzleNumber);
     payload.insert(QStringLiteral("layout_type"), m_layoutType);
     payload.insert(QStringLiteral("hint"), m_hintText);
+    payload.insert(QStringLiteral("hint_text"), m_hintText);
     payload.insert(QStringLiteral("active_team"), m_activeTeam);
     payload.insert(QStringLiteral("game_stage"), m_stage);
     payload.insert(QStringLiteral("submitted_answer"), m_submittedAnswer);
     payload.insert(QStringLiteral("missing_reveal_text"), m_missingRevealText);
     payload.insert(QStringLiteral("answer_was_correct"), m_answerWasCorrect);
 
-    if (m_stage == GameConstants::Stage::Resolution || m_answerWasCorrect) {
-        payload.insert(QStringLiteral("correct_answer"), m_correctAnswer);
-    } else {
-        payload.insert(QStringLiteral("correct_answer"), QString());
-    }
+    const bool shouldExposeAnswer = m_stage == GameConstants::Stage::Resolution || m_answerWasCorrect;
+    const QString revealedAnswer = primaryCorrectAnswer();
+    payload.insert(QStringLiteral("correct_answer"), shouldExposeAnswer ? revealedAnswer : QString());
+    payload.insert(QStringLiteral("correct_answer_text"), shouldExposeAnswer ? revealedAnswer : QString());
 
     QJsonArray quotes;
     for (const QString &quote : m_quoteSlots) {
         quotes.append(quote);
     }
     payload.insert(QStringLiteral("quote_slots"), quotes);
+
+    QJsonArray hints;
+    for (const QString &hint : m_puzzleHints) {
+        hints.append(hint);
+    }
+    payload.insert(QStringLiteral("hints"), hints);
+
+    QJsonArray visibleHintsArray;
+    for (const QString &hint : visibleHints()) {
+        visibleHintsArray.append(hint);
+    }
+    payload.insert(QStringLiteral("visible_hints"), visibleHintsArray);
+
+    QJsonArray answers;
+    for (const QString &answer : preparedAnswerList()) {
+        answers.append(answer);
+    }
+    payload.insert(QStringLiteral("answers"), answers);
+
+    QJsonArray images;
+    const int slotCount = layoutImageSlotCount();
+    for (int slot = 0; slot < slotCount; ++slot) {
+        images.append(puzzleDisplayImageUrl(slot));
+    }
+    payload.insert(QStringLiteral("images"), images);
     return payload;
 }
 
@@ -644,20 +820,10 @@ void GameViewModel::loadPersistedState()
     m_presetId = m_state.presetId;
     m_roundScoreTeamA = m_state.roundScoreTeamA;
     m_roundScoreTeamB = m_state.roundScoreTeamB;
-
-    const QVector<TeamInfo> teams = m_database->listTeams();
-    if (teams.size() >= 2) {
-        m_teamAId = teams.at(0).id;
-        m_teamBId = teams.at(1).id;
-        m_teamAName = teams.at(0).name;
-        m_teamBName = teams.at(1).name;
-        m_totalScoreTeamA = teams.at(0).score;
-        m_totalScoreTeamB = teams.at(1).score;
-    }
-
+    reloadTeamsFromDatabase();
     const bool hasPreset = m_presetId > 0;
     const bool hasRounds = hasPreset && !m_database->listRoundsForPreset(m_presetId).isEmpty();
-    const bool hasTeams = teams.size() >= 2;
+    const bool hasTeams = m_teamAId > 0 && m_teamBId > 0;
     m_hasActiveSession = m_state.activeSession && hasPreset && hasRounds && hasTeams;
     if (!m_hasActiveSession) {
         m_presetId = 0;
@@ -676,9 +842,19 @@ void GameViewModel::loadPersistedState()
 
 void GameViewModel::persistState()
 {
+    if (!m_database) {
+        return;
+    }
+
     m_state.presetId = m_presetId;
     m_state.roundId = m_rounds.isEmpty() ? 0 : m_rounds.at(m_roundIndex).id;
-    m_state.puzzleId = m_currentPuzzles.isEmpty() ? 0 : m_currentPuzzles.at(m_puzzleIndex).id;
+
+    int puzzleId = m_currentPuzzles.isEmpty() ? 0 : m_currentPuzzles.at(m_puzzleIndex).id;
+    if (puzzleId > 0) {
+        puzzleId = m_database->canonicalPuzzleId(puzzleId);
+    }
+    m_state.puzzleId = puzzleId;
+
     m_state.turnTeamId = m_activeTeam == GameConstants::TEAM_B ? m_teamBId : m_teamAId;
     if (!(m_hasActiveSession && m_stage == GameConstants::Stage::Welcome)) {
         m_state.stage = m_stage;
@@ -688,6 +864,106 @@ void GameViewModel::persistState()
     m_state.roundScoreTeamB = m_roundScoreTeamB;
     m_state.activeSession = m_hasActiveSession;
     m_database->saveGameState(m_state);
+}
+
+void GameViewModel::reloadTeamsFromDatabase()
+{
+    if (!m_database) {
+        return;
+    }
+
+    const QVector<TeamInfo> teams = m_database->listTeams();
+    if (teams.size() < 2) {
+        return;
+    }
+
+    m_teamAId = teams.at(0).id;
+    m_teamBId = teams.at(1).id;
+    m_teamAName = teams.at(0).name;
+    m_teamBName = teams.at(1).name;
+    m_totalScoreTeamA = teams.at(0).score;
+    m_totalScoreTeamB = teams.at(1).score;
+}
+
+int GameViewModel::resolvePuzzleIndex(const QVector<PuzzleInfo> &puzzles, int savedPuzzleId) const
+{
+    if (puzzles.isEmpty() || savedPuzzleId <= 0 || !m_database) {
+        return 0;
+    }
+
+    const int canonicalId = m_database->canonicalPuzzleId(savedPuzzleId);
+    for (int i = 0; i < puzzles.size(); ++i) {
+        if (puzzles.at(i).id == canonicalId) {
+            return i;
+        }
+    }
+
+    const PuzzleInfo saved = m_database->puzzleById(savedPuzzleId);
+    if (saved.id > 0) {
+        for (int i = 0; i < puzzles.size(); ++i) {
+            if (puzzles.at(i).sortOrder == saved.sortOrder) {
+                return i;
+            }
+        }
+    }
+
+    return 0;
+}
+
+void GameViewModel::applyPersistedTurnState()
+{
+    const QString mainTeam = mainTeamForPuzzle(m_puzzleNumber);
+    const QString stealTeam = opponentTeam(mainTeam);
+
+    if (m_stage == GameConstants::Stage::StealTurn) {
+        m_isStealTurn = true;
+        m_activeTeam = stealTeam;
+    } else if (m_stage == GameConstants::Stage::MainTurn) {
+        m_isStealTurn = false;
+        m_activeTeam = mainTeam;
+    } else if (m_stage == GameConstants::Stage::ClosedCards) {
+        if (m_subState == GameConstants::SubState::StealTurn) {
+            m_isStealTurn = true;
+            m_activeTeam = stealTeam;
+        } else {
+            m_isStealTurn = false;
+            m_activeTeam = mainTeam;
+        }
+    } else if (m_teamAId > 0 && m_teamBId > 0 && m_state.turnTeamId > 0) {
+        m_activeTeam = m_state.turnTeamId == m_teamBId ? GameConstants::TEAM_B : GameConstants::TEAM_A;
+        m_isStealTurn = m_activeTeam != mainTeam
+                        && (m_stage == GameConstants::Stage::StealTurn
+                            || m_stage == GameConstants::Stage::ClosedCards);
+    } else if (m_activeTeam.isEmpty()) {
+        m_activeTeam = mainTeam;
+        m_isStealTurn = false;
+    }
+
+    emit activeTeamChanged();
+}
+
+QString GameViewModel::mainTeamForPuzzle(int puzzleNumber) const
+{
+    return puzzleNumber % 2 == 1 ? GameConstants::TEAM_A : GameConstants::TEAM_B;
+}
+
+QString GameViewModel::opponentTeam(const QString &team) const
+{
+    return team == GameConstants::TEAM_B ? GameConstants::TEAM_A : GameConstants::TEAM_B;
+}
+
+void GameViewModel::setActiveTeamForMainTurn()
+{
+    m_isStealTurn = false;
+    m_activeTeam = mainTeamForPuzzle(m_puzzleNumber);
+    emit activeTeamChanged();
+}
+
+void GameViewModel::setActiveTeamForStealTurn()
+{
+    m_isStealTurn = true;
+    m_activeTeam = opponentTeam(mainTeamForPuzzle(m_puzzleNumber));
+    emit activeTeamChanged();
 }
 
 void GameViewModel::setStage(const QString &stage)
@@ -744,11 +1020,16 @@ void GameViewModel::loadCurrentRound()
     m_showMilliseconds = round.layoutType == GameConstants::LayoutType::BlitzStandard;
 
     m_currentPuzzles = m_database->listPuzzlesForRound(round.id);
+    if (m_currentPuzzles.size() > GameConstants::MAX_PUZZLES_PER_ROUND) {
+        m_currentPuzzles.resize(GameConstants::MAX_PUZZLES_PER_ROUND);
+    }
     m_state.roundId = round.id;
 
     emit layoutTypeChanged();
     emit roundTitleChanged();
     emit ruleTextChanged();
+    emit roundProgressChanged();
+    emit roundScoreChanged();
 }
 
 void GameViewModel::loadCurrentPuzzle()
@@ -758,8 +1039,9 @@ void GameViewModel::loadCurrentPuzzle()
     }
 
     const PuzzleInfo puzzle = m_currentPuzzles.at(m_puzzleIndex);
-    m_puzzleNumber = puzzle.sortOrder;
+    m_puzzleNumber = m_puzzleIndex + 1;
     m_correctAnswer = puzzle.correctAnswer;
+    loadAnswerOptionsFromPuzzle(puzzle);
     parsePackedHints(m_database->localizedString(puzzle.hintTextKey));
     m_state.puzzleId = puzzle.id;
 
@@ -773,7 +1055,7 @@ void GameViewModel::loadCurrentPuzzle()
         if (!contour.isEmpty()) {
             PuzzleMaskInfo legacy;
             legacy.sortOrder = 1;
-            legacy.answerText = puzzle.correctAnswer;
+            legacy.answerText = primaryCorrectAnswer();
             legacy.contourPoints = contour;
             m_puzzleMasks.append(legacy);
         }
@@ -798,6 +1080,7 @@ void GameViewModel::loadCurrentPuzzle()
     }
 
     resetPuzzlePresentation();
+    ++m_puzzleImageRevision;
     emit puzzleNumberChanged();
     emit hintTextChanged();
     emit hintsChanged();
@@ -807,6 +1090,10 @@ void GameViewModel::loadCurrentPuzzle()
 void GameViewModel::resetPuzzlePresentation()
 {
     stopTimer();
+    if (m_gracePeriodActive) {
+        m_gracePeriodActive = false;
+        emit gracePeriodChanged();
+    }
     m_userAnswer.clear();
     m_submittedAnswer.clear();
     m_missingRevealText.clear();
@@ -831,6 +1118,8 @@ void GameViewModel::resetPuzzlePresentation()
 void GameViewModel::startMainTimer()
 {
     m_isStealTurn = false;
+    m_gracePeriodActive = false;
+    emit gracePeriodChanged();
     m_timerSeconds = m_baseTimerSeconds;
     m_timerMilliseconds = 0;
     emit timerChanged();
@@ -840,11 +1129,41 @@ void GameViewModel::startMainTimer()
 
 void GameViewModel::startStealTimer()
 {
+    m_gracePeriodActive = false;
+    emit gracePeriodChanged();
     m_timerSeconds = m_stealTimerSeconds;
     m_timerMilliseconds = 0;
     emit timerChanged();
     updateHintUnlockState();
     m_gameTimer.start();
+}
+
+void GameViewModel::startGracePeriod()
+{
+    m_gracePeriodActive = true;
+    m_timerSeconds = kGracePeriodSeconds;
+    m_timerMilliseconds = 0;
+    emit gracePeriodChanged();
+    emit timerChanged();
+    m_gameTimer.start();
+}
+
+void GameViewModel::finishGracePeriod()
+{
+    m_gracePeriodActive = false;
+    emit gracePeriodChanged();
+    stopTimer();
+
+    if (!m_userAnswer.trimmed().isEmpty()) {
+        submitAnswer(m_userAnswer);
+        return;
+    }
+
+    if (m_isStealTurn) {
+        enterResolution();
+    } else {
+        transferTurn();
+    }
 }
 
 void GameViewModel::stopTimer()
@@ -862,9 +1181,11 @@ void GameViewModel::onTimerTick()
     } else if (m_timerSeconds > 0) {
         m_timerMilliseconds = 1000 - kTimerTickMs;
         --m_timerSeconds;
+    } else if (m_gracePeriodActive) {
+        finishGracePeriod();
+        return;
     } else {
-        stopTimer();
-        submitAnswer(QString());
+        startGracePeriod();
         return;
     }
 
@@ -882,7 +1203,7 @@ void GameViewModel::evaluateAnswer(const QString &answer)
         matchedGroupIndex = findAnswerGroupIndex(answer);
         correct = matchedGroupIndex >= 0 && !isGroupRevealed(matchedGroupIndex);
     } else {
-        correct = normalizeAnswer(answer) == normalizeAnswer(m_correctAnswer);
+        correct = matchesAcceptedAnswer(answer);
     }
 
     m_answerWasCorrect = correct;
@@ -892,6 +1213,8 @@ void GameViewModel::evaluateAnswer(const QString &answer)
         if (m_layoutType == GameConstants::LayoutType::FullMask && matchedGroupIndex >= 0) {
             revealAnswerGroup(matchedGroupIndex);
         }
+        m_userAnswer.clear();
+        emit userAnswerChanged();
         m_isCorrectFlash = true;
         emit evaluationFlashChanged();
         m_flashTimer.start();
@@ -927,7 +1250,7 @@ void GameViewModel::evaluateAnswer(const QString &answer)
 
 void GameViewModel::enterMissingReveal(bool /*wasCorrect*/)
 {
-    QString detail = m_correctAnswer;
+    QString detail = primaryCorrectAnswer();
     if (m_layoutType == GameConstants::LayoutType::FullMask && m_lastRevealedGroupIndex >= 0) {
         detail = formatRevealDetail(m_lastRevealedGroupIndex);
     }
@@ -943,7 +1266,7 @@ void GameViewModel::enterMissingReveal(bool /*wasCorrect*/)
 
 void GameViewModel::enterResolution()
 {
-    m_revealedAnswer = m_correctAnswer;
+    m_revealedAnswer = primaryCorrectAnswer();
     emit revealedAnswerChanged();
     setStage(GameConstants::Stage::Resolution);
     setSubState(GameConstants::SubState::AwaitingResolve);
@@ -952,24 +1275,120 @@ void GameViewModel::enterResolution()
 
 void GameViewModel::awardPointToActiveTeam()
 {
+    const int maxStars = maxRoundStars();
+    bool changed = false;
     if (m_activeTeam == GameConstants::TEAM_A) {
-        if (m_roundScoreTeamA < GameConstants::MAX_ROUND_STARS) {
+        if (m_roundScoreTeamA < maxStars) {
             ++m_roundScoreTeamA;
-            ++m_totalScoreTeamA;
+            changed = true;
         }
-    } else if (m_roundScoreTeamB < GameConstants::MAX_ROUND_STARS) {
+    } else if (m_activeTeam == GameConstants::TEAM_B && m_roundScoreTeamB < maxStars) {
         ++m_roundScoreTeamB;
+        changed = true;
+    }
+
+    if (!changed) {
+        return;
+    }
+
+    emit roundScoreChanged();
+    persistState();
+}
+
+void GameViewModel::settleRoundScores()
+{
+    if (m_lastSettledRoundIndex == m_roundIndex) {
+        return;
+    }
+    m_lastSettledRoundIndex = m_roundIndex;
+
+    if (m_roundScoreTeamA > m_roundScoreTeamB) {
+        ++m_totalScoreTeamA;
+    } else if (m_roundScoreTeamB > m_roundScoreTeamA) {
+        ++m_totalScoreTeamB;
+    } else {
+        ++m_totalScoreTeamA;
         ++m_totalScoreTeamB;
     }
 
     QVector<TeamInfo> teams;
-    TeamInfo a{m_teamAId, m_teamAName, m_totalScoreTeamA};
-    TeamInfo b{m_teamBId, m_teamBName, m_totalScoreTeamB};
-    teams << a << b;
+    teams << TeamInfo{m_teamAId, m_teamAName, m_totalScoreTeamA}
+          << TeamInfo{m_teamBId, m_teamBName, m_totalScoreTeamB};
     m_database->saveTeams(teams);
 
-    emit roundScoreChanged();
     emit teamsChanged();
+    persistState();
+}
+
+bool GameViewModel::shouldEndRoundEarly() const
+{
+    const int a = m_roundScoreTeamA;
+    const int b = m_roundScoreTeamB;
+    if (a == b) {
+        return false;
+    }
+
+    const int lead = qMax(a, b);
+    const int trail = qMin(a, b);
+    if (lead >= GameConstants::MAX_ROUND_STARS) {
+        return true;
+    }
+
+    if (lead < 4 || trail > 3) {
+        return false;
+    }
+
+    const int gap = lead - trail;
+    return gap > 1 || (lead == 4 && trail == 3);
+}
+
+bool GameViewModel::tryCompleteRoundEarly()
+{
+    if (!shouldEndRoundEarly()) {
+        return false;
+    }
+
+    stopTimer();
+    resetPuzzlePresentation();
+    m_cardsFaceUp = false;
+    emit cardsFaceUpChanged(false);
+    setStage(GameConstants::Stage::RoundEnded);
+    persistState();
+    return true;
+}
+
+void GameViewModel::proceedAfterScoring()
+{
+    if (tryCompleteRoundEarly()) {
+        return;
+    }
+    advancePuzzleOrRound();
+}
+
+void GameViewModel::confirmRoundEnd()
+{
+    if (m_stage != GameConstants::Stage::RoundEnded) {
+        return;
+    }
+
+    settleRoundScores();
+
+    if (m_roundIndex + 1 >= m_rounds.size()) {
+        finishGameVictory();
+        return;
+    }
+
+    setStage(GameConstants::Stage::InterRound);
+    persistState();
+}
+
+void GameViewModel::finishGameVictory()
+{
+    setStage(GameConstants::Stage::FinalVictory);
+    m_hasActiveSession = false;
+    emit hasActiveSessionChanged(false);
+    persistState();
+    emit gameFinished();
 }
 
 void GameViewModel::advancePuzzleOrRound()
@@ -984,14 +1403,19 @@ void GameViewModel::advancePuzzleOrRound()
         setSubState(GameConstants::SubState::AwaitingReady);
         m_cardsFaceUp = false;
         emit cardsFaceUpChanged(false);
-        m_activeTeam = GameConstants::TEAM_A;
-        emit activeTeamChanged();
+        setActiveTeamForMainTurn();
         persistState();
         return;
     }
 
-    setStage(GameConstants::Stage::InterRound);
-    persistState();
+    settleRoundScores();
+
+    if (m_roundIndex + 1 >= m_rounds.size()) {
+        finishGameVictory();
+    } else {
+        setStage(GameConstants::Stage::InterRound);
+        persistState();
+    }
 }
 
 QString GameViewModel::normalizeAnswer(const QString &answer) const
@@ -999,6 +1423,68 @@ QString GameViewModel::normalizeAnswer(const QString &answer) const
     QString normalized = answer.trimmed().toLower();
     normalized.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
     return normalized;
+}
+
+void GameViewModel::loadAnswerOptionsFromPuzzle(const PuzzleInfo &puzzle)
+{
+    m_answerOptions.clear();
+    if (puzzle.correctOrder.isEmpty()) {
+        return;
+    }
+
+    const QJsonDocument doc = QJsonDocument::fromJson(puzzle.correctOrder.toUtf8());
+    if (!doc.isArray()) {
+        return;
+    }
+
+    for (const QJsonValue &value : doc.array()) {
+        const QString option = value.toString().trimmed();
+        if (option.isEmpty() || option.startsWith(kHybridAnimPrefix)) {
+            continue;
+        }
+        m_answerOptions.append(option);
+    }
+}
+
+QString GameViewModel::primaryCorrectAnswer() const
+{
+    for (const QString &option : m_answerOptions) {
+        const QString trimmed = option.trimmed();
+        if (!trimmed.isEmpty()) {
+            return trimmed;
+        }
+    }
+
+    const QStringList parts = m_correctAnswer.split(QRegularExpression(QStringLiteral("[,;|]+")),
+                                                  Qt::SkipEmptyParts);
+    for (const QString &part : parts) {
+        const QString trimmed = part.trimmed();
+        if (!trimmed.isEmpty()) {
+            return trimmed;
+        }
+    }
+
+    return m_correctAnswer.trimmed();
+}
+
+QStringList GameViewModel::acceptedAnswers() const
+{
+    return preparedAnswerList();
+}
+
+bool GameViewModel::matchesAcceptedAnswer(const QString &answer) const
+{
+    const QString normalized = normalizeAnswer(answer);
+    if (normalized.isEmpty()) {
+        return false;
+    }
+
+    for (const QString &candidate : acceptedAnswers()) {
+        if (normalizeAnswer(candidate) == normalized) {
+            return true;
+        }
+    }
+    return false;
 }
 
 QString GameViewModel::activeTeamIdLabel() const

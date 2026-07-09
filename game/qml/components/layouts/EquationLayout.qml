@@ -4,11 +4,12 @@ import "../.."
 import ".."
 
 RowLayout {
+    anchors.fill: parent
     spacing: Theme.spacing
 
     GameCard {
         Layout.fillHeight: true
-        Layout.preferredWidth: 140
+        Layout.preferredWidth: Theme.slotSize * 1.8
         faceUp: gameViewModel.cardsFaceUp
         cardIndex: 0
         label: gameViewModel.label("ui.layout.equation_operand").arg(1)
@@ -24,7 +25,7 @@ RowLayout {
 
     GameCard {
         Layout.fillHeight: true
-        Layout.preferredWidth: 140
+        Layout.preferredWidth: Theme.slotSize * 1.8
         faceUp: gameViewModel.cardsFaceUp
         cardIndex: 1
         label: gameViewModel.label("ui.layout.equation_operand").arg(2)
@@ -40,7 +41,7 @@ RowLayout {
 
     GameCard {
         Layout.fillHeight: true
-        Layout.preferredWidth: 140
+        Layout.preferredWidth: Theme.slotSize * 1.8
         faceUp: gameViewModel.cardsFaceUp
         cardIndex: 2
         hideAnswer: true

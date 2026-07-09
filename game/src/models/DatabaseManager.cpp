@@ -128,6 +128,12 @@ bool DatabaseManager::initialize()
     if (!syncUiDefaultsToDatabase()) {
         return false;
     }
+    if (!normalizePuzzleHintKeys()) {
+        return false;
+    }
+    if (!repairDuplicatePuzzles()) {
+        return false;
+    }
 
     return true;
 }
@@ -481,6 +487,104 @@ bool DatabaseManager::syncUiDefaultsToDatabase()
         }
     }
 
+    return true;
+}
+
+bool DatabaseManager::normalizePuzzleHintKeys()
+{
+    QMutexLocker locker(&m_mutex);
+    QSqlDatabase db = database();
+
+    QSqlQuery listQuery(db);
+    if (!listQuery.exec(QStringLiteral("SELECT id, hint_text_key FROM puzzles ORDER BY id"))) {
+        emit databaseError(listQuery.lastError().text());
+        return false;
+    }
+
+    struct PuzzleHintRow {
+        int puzzleId = 0;
+        QString currentKey;
+    };
+    QVector<PuzzleHintRow> rows;
+    while (listQuery.next()) {
+        PuzzleHintRow row;
+        row.puzzleId = listQuery.value(0).toInt();
+        row.currentKey = listQuery.value(1).toString();
+        rows.append(row);
+    }
+
+    if (rows.isEmpty()) {
+        return true;
+    }
+
+    if (!db.transaction()) {
+        emit databaseError(db.lastError().text());
+        return false;
+    }
+
+    auto readLocalized = [&db](const QString &key, const QString &lang) -> QString {
+        if (key.trimmed().isEmpty()) {
+            return {};
+        }
+        QSqlQuery q(db);
+        q.prepare(QStringLiteral(
+            "SELECT translated_text FROM localization_strings WHERE string_key = ? AND lang_code = ?"));
+        q.addBindValue(key);
+        q.addBindValue(lang);
+        if (!q.exec() || !q.next()) {
+            return {};
+        }
+        return q.value(0).toString();
+    };
+
+    auto upsertLocalized = [this, &db](const QString &key, const QString &lang, const QString &text) -> bool {
+        QSqlQuery q(db);
+        q.prepare(QStringLiteral(
+            "INSERT INTO localization_strings (string_key, lang_code, translated_text) VALUES (?, ?, ?) "
+            "ON CONFLICT(string_key, lang_code) DO UPDATE SET translated_text = excluded.translated_text"));
+        q.addBindValue(key);
+        q.addBindValue(lang);
+        q.addBindValue(text);
+        if (!q.exec()) {
+            emit databaseError(q.lastError().text());
+            return false;
+        }
+        return true;
+    };
+
+    for (const PuzzleHintRow &row : rows) {
+        const QString targetKey = QStringLiteral("puzzle.hint.p%1").arg(row.puzzleId);
+
+        QString ru = readLocalized(row.currentKey, QStringLiteral("ru"));
+        QString en = readLocalized(row.currentKey, QStringLiteral("en"));
+        if (ru.isEmpty()) {
+            ru = readLocalized(targetKey, QStringLiteral("ru"));
+        }
+        if (en.isEmpty()) {
+            en = readLocalized(targetKey, QStringLiteral("en"));
+        }
+
+        QSqlQuery updatePuzzleQuery(db);
+        updatePuzzleQuery.prepare(QStringLiteral("UPDATE puzzles SET hint_text_key = ? WHERE id = ?"));
+        updatePuzzleQuery.addBindValue(targetKey);
+        updatePuzzleQuery.addBindValue(row.puzzleId);
+        if (!updatePuzzleQuery.exec()) {
+            emit databaseError(updatePuzzleQuery.lastError().text());
+            db.rollback();
+            return false;
+        }
+
+        if (!upsertLocalized(targetKey, QStringLiteral("ru"), ru)
+            || !upsertLocalized(targetKey, QStringLiteral("en"), en)) {
+            db.rollback();
+            return false;
+        }
+    }
+
+    if (!db.commit()) {
+        emit databaseError(db.lastError().text());
+        return false;
+    }
     return true;
 }
 
@@ -1074,18 +1178,7 @@ bool DatabaseManager::updatePuzzle(int puzzleId,
                                    const QString &answerOptionsJson)
 {
     QMutexLocker locker(&m_mutex);
-
-    QSqlQuery existingQuery(database());
-    existingQuery.prepare(QStringLiteral("SELECT hint_text_key FROM puzzles WHERE id = ?"));
-    existingQuery.addBindValue(puzzleId);
-    if (!existingQuery.exec() || !existingQuery.next()) {
-        return false;
-    }
-
-    QString hintKey = existingQuery.value(0).toString();
-    if (hintKey.isEmpty()) {
-        hintKey = QStringLiteral("puzzle.hint.p%1").arg(puzzleId);
-    }
+    const QString hintKey = QStringLiteral("puzzle.hint.p%1").arg(puzzleId);
 
     QSqlQuery query(database());
     query.prepare(QStringLiteral(
@@ -1402,25 +1495,55 @@ QVector<PuzzleInfo> DatabaseManager::listPuzzlesForRound(int roundId) const
     query.prepare(QStringLiteral(
         "SELECT id, round_id, sort_order, correct_answer, hint_text_key, points, template_id, "
         "puzzle_quote_slots, correct_order "
-        "FROM puzzles WHERE round_id = ? ORDER BY sort_order"));
+        "FROM puzzles WHERE round_id = ? ORDER BY sort_order, id"));
     query.addBindValue(roundId);
     if (!query.exec()) {
         emit const_cast<DatabaseManager *>(this)->databaseError(query.lastError().text());
         return puzzles;
     }
 
+    QHash<int, PuzzleInfo> bestBySortOrder;
+    QHash<int, int> imageCountsByPuzzleId;
     while (query.next()) {
         PuzzleInfo info;
         info.id = query.value(0).toInt();
         info.roundId = query.value(1).toInt();
         info.sortOrder = query.value(2).toInt();
-        info.correctAnswer = query.value(3).toString();
+        info.correctAnswer = repairUtf8Mojibake(query.value(3).toString());
         info.hintTextKey = query.value(4).toString();
         info.points = query.value(5).toInt();
         info.templateId = query.value(6).toInt();
         info.quoteSlotsJson = query.value(7).toString();
         info.correctOrder = query.value(8).toString();
-        puzzles.append(info);
+
+        int imageCount = 0;
+        QSqlQuery imageCountQuery(database());
+        imageCountQuery.prepare(QStringLiteral(
+            "SELECT COUNT(*) FROM puzzle_images WHERE puzzle_id = ? AND length(image_data) > 0"));
+        imageCountQuery.addBindValue(info.id);
+        if (imageCountQuery.exec() && imageCountQuery.next()) {
+            imageCount = imageCountQuery.value(0).toInt();
+        }
+        imageCountsByPuzzleId.insert(info.id, imageCount);
+
+        const auto existing = bestBySortOrder.constFind(info.sortOrder);
+        if (existing == bestBySortOrder.constEnd()) {
+            bestBySortOrder.insert(info.sortOrder, info);
+            continue;
+        }
+
+        const int existingImages = imageCountsByPuzzleId.value(existing->id);
+        if (imageCount > existingImages
+            || (imageCount == existingImages && info.id < existing->id)) {
+            bestBySortOrder.insert(info.sortOrder, info);
+        }
+    }
+
+    puzzles.reserve(bestBySortOrder.size());
+    QList<int> sortOrders = bestBySortOrder.keys();
+    std::sort(sortOrders.begin(), sortOrders.end());
+    for (int sortOrder : sortOrders) {
+        puzzles.append(bestBySortOrder.value(sortOrder));
     }
     return puzzles;
 }
@@ -1618,19 +1741,128 @@ bool DatabaseManager::saveGameState(const GameStateSnapshot &state)
     return true;
 }
 
-QByteArray DatabaseManager::puzzleImageData(int puzzleId, int slotIndex) const
+int DatabaseManager::puzzleImageSlotCount(int puzzleId) const
 {
     QMutexLocker locker(&m_mutex);
 
     QSqlQuery query(database());
     query.prepare(QStringLiteral(
-        "SELECT image_data FROM puzzle_images WHERE puzzle_id = ? AND slot_index = ? LIMIT 1"));
+        "SELECT COUNT(*) FROM puzzle_images WHERE puzzle_id = ? AND length(image_data) > 0"));
     query.addBindValue(puzzleId);
-    query.addBindValue(slotIndex);
     if (!query.exec() || !query.next()) {
-        return {};
+        return 0;
     }
-    return query.value(0).toByteArray();
+    return query.value(0).toInt();
+}
+
+int DatabaseManager::canonicalPuzzleId(int puzzleId) const
+{
+    QMutexLocker locker(&m_mutex);
+    return canonicalPuzzleIdUnlocked(puzzleId);
+}
+
+int DatabaseManager::canonicalPuzzleIdUnlocked(int puzzleId) const
+{
+    if (puzzleId <= 0) {
+        return puzzleId;
+    }
+
+    QSqlQuery contextQuery(database());
+    contextQuery.prepare(QStringLiteral(
+        "SELECT round_id, sort_order FROM puzzles WHERE id = ? LIMIT 1"));
+    contextQuery.addBindValue(puzzleId);
+    if (!contextQuery.exec() || !contextQuery.next()) {
+        return puzzleId;
+    }
+
+    const int roundId = contextQuery.value(0).toInt();
+    const int sortOrder = contextQuery.value(1).toInt();
+    if (roundId <= 0) {
+        return puzzleId;
+    }
+
+    QSqlQuery siblingsQuery(database());
+    siblingsQuery.prepare(QStringLiteral(
+        "SELECT p.id, (SELECT COUNT(*) FROM puzzle_images pi "
+        "WHERE pi.puzzle_id = p.id AND length(pi.image_data) > 0) AS image_count "
+        "FROM puzzles p WHERE p.round_id = ? AND p.sort_order = ? "
+        "ORDER BY image_count DESC, p.id ASC"));
+    siblingsQuery.addBindValue(roundId);
+    siblingsQuery.addBindValue(sortOrder);
+    if (!siblingsQuery.exec() || !siblingsQuery.next()) {
+        return puzzleId;
+    }
+
+    return siblingsQuery.value(0).toInt();
+}
+
+bool DatabaseManager::repairDuplicatePuzzles()
+{
+    QMutexLocker locker(&m_mutex);
+
+    GameStateSnapshot state;
+    QSqlQuery stateQuery(database());
+    if (!stateQuery.exec(QStringLiteral(
+            "SELECT current_preset_id, current_round_id, current_puzzle_id, current_turn_team_id, "
+            "current_stage, current_sub_state, round_score_team_A, round_score_team_B, is_active_session "
+            "FROM game_state WHERE id = 1"))
+        || !stateQuery.next()) {
+        return true;
+    }
+
+    state.presetId = stateQuery.value(0).toInt();
+    state.roundId = stateQuery.value(1).toInt();
+    state.puzzleId = stateQuery.value(2).toInt();
+    state.turnTeamId = stateQuery.value(3).toInt();
+    state.stage = stateQuery.value(4).toString();
+    state.subState = stateQuery.value(5).toString();
+    state.roundScoreTeamA = stateQuery.value(6).toInt();
+    state.roundScoreTeamB = stateQuery.value(7).toInt();
+    state.activeSession = stateQuery.value(8).toInt() != 0;
+
+    if (state.puzzleId > 0) {
+        const int canonicalId = canonicalPuzzleIdUnlocked(state.puzzleId);
+        if (canonicalId > 0 && canonicalId != state.puzzleId) {
+            state.puzzleId = canonicalId;
+            locker.unlock();
+            return saveGameState(state);
+        }
+    }
+
+    return true;
+}
+
+QByteArray DatabaseManager::fetchPuzzleImageData(int puzzleId, int slotIndex) const
+{
+    return puzzleImageData(puzzleId, slotIndex);
+}
+
+QByteArray DatabaseManager::puzzleImageData(int puzzleId, int slotIndex) const
+{
+    QMutexLocker locker(&m_mutex);
+
+    const auto loadSlot = [&](int id) -> QByteArray {
+        QSqlQuery query(database());
+        query.prepare(QStringLiteral(
+            "SELECT image_data FROM puzzle_images WHERE puzzle_id = ? AND slot_index = ? LIMIT 1"));
+        query.addBindValue(id);
+        query.addBindValue(slotIndex);
+        if (!query.exec() || !query.next()) {
+            return {};
+        }
+        return query.value(0).toByteArray();
+    };
+
+    QByteArray data = loadSlot(puzzleId);
+    if (!data.isEmpty()) {
+        return data;
+    }
+
+    const int canonicalId = canonicalPuzzleIdUnlocked(puzzleId);
+    if (canonicalId > 0 && canonicalId != puzzleId) {
+        data = loadSlot(canonicalId);
+    }
+    return data;
 }
 
 bool DatabaseManager::upsertPuzzleImage(int puzzleId, int slotIndex, const QByteArray &imageData)

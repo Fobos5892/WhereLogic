@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 154">
+  <defs>
+    <linearGradient id="cardBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#252D38"/>
+      <stop offset="100%" stop-color="#1A2230"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="116" height="150" rx="12" fill="url(#cardBg)" stroke="#45A29E" stroke-width="2.5"/>
+  <rect x="14" y="14" width="92" height="126" rx="8" fill="none" stroke="#45A29E" stroke-width="1" opacity="0.35"/>
+  <circle cx="60" cy="72" r="28" fill="none" stroke="#66FCF1" stroke-width="2" opacity="0.45"/>
+  <text x="60" y="84" text-anchor="middle" font-size="42" font-weight="700" fill="#66FCF1" font-family="Segoe UI, Arial, sans-serif">?</text>
+  <line x1="28" y1="128" x2="92" y2="128" stroke="#45A29E" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+  <line x1="36" y1="136" x2="84" y2="136" stroke="#45A29E" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
+  <line x1="44" y1="144" x2="76" y2="144" stroke="#45A29E" stroke-width="2" stroke-linecap="round" opacity="0.25"/>
+</svg>

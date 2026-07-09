@@ -9,7 +9,7 @@ Rectangle {
     NeonPanel {
         id: revealPanel
         anchors.centerIn: parent
-        width: Math.min(parent.width * 0.85, 520)
+        width: parent.width * 0.85
 
         Column {
             width: revealPanel.innerWidth
@@ -35,7 +35,7 @@ Rectangle {
 
             Rectangle {
                 width: parent.width
-                height: 220
+                height: parent.width * Theme.cardAspect
                 radius: Theme.radius
                 color: Theme.surfaceAlt
                 visible: gameViewModel.layoutType === "FULL_MASK"
@@ -53,8 +53,8 @@ Rectangle {
 
                 Image {
                     anchors.centerIn: parent
-                    width: 44
-                    height: 44
+                    width: Theme.iconLg * 1.5
+                    height: width
                     visible: revealImage.status === Image.Loading
                     source: "qrc:/qml/assets/spinner.svg"
                     fillMode: Image.PreserveAspectFit
@@ -62,7 +62,7 @@ Rectangle {
                     RotationAnimation on rotation {
                         from: 0
                         to: 360
-                        duration: 850
+                        duration: Theme.animNormal * 2
                         loops: Animation.Infinite
                         running: revealImage.status === Image.Loading
                     }

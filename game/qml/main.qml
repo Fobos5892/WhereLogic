@@ -7,10 +7,10 @@ import "components"
 
 ApplicationWindow {
     id: root
-    width: 960
-    height: 540
-    minimumWidth: 480
-    minimumHeight: 270
+    width: Math.round(Screen.width * 0.75)
+    height: Math.round(Screen.height * 0.75)
+    minimumWidth: Math.round(Screen.width * 0.5)
+    minimumHeight: Math.round(Screen.height * 0.5)
     visible: true
     title: gameViewModel.label("ui.app.title")
     color: Theme.background
@@ -25,8 +25,10 @@ ApplicationWindow {
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: Theme.touchMin * 0.75
-        z: 50
+        anchors.leftMargin: Theme.chromeSize + Theme.spacing * 2
+        anchors.rightMargin: Theme.chromeSize + Theme.spacing * 2
+        height: Theme.spacing * 0.6
+        z: 5
         visible: root.visibility === Window.Windowed
         onPressed: function(mouse) {
             if (mouse.button === Qt.LeftButton)

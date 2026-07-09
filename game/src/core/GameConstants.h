@@ -16,8 +16,8 @@ constexpr int PIN_LENGTH = 5;
 // Timer policy
 constexpr int STEAL_MIN_SECONDS = 15;
 constexpr double CRITICAL_TIMER_THRESHOLD_SECONDS = 10.0;
-constexpr int MAX_ROUND_STARS = 5;
 constexpr int MAX_PUZZLES_PER_ROUND = 10;
+constexpr int MAX_ROUND_STARS = 5;
 
 // Teams
 inline const QString TEAM_A = QStringLiteral("Team_A");
@@ -33,6 +33,7 @@ inline const QString StealTurn = QStringLiteral("STAGE_STEAL_TURN");
 inline const QString Evaluating = QStringLiteral("STAGE_EVALUATING");
 inline const QString MissingReveal = QStringLiteral("STAGE_MISSING_REVEAL");
 inline const QString Resolution = QStringLiteral("STAGE_RESOLUTION");
+inline const QString RoundEnded = QStringLiteral("STAGE_ROUND_ENDED");
 inline const QString InterRound = QStringLiteral("STAGE_INTER_ROUND");
 inline const QString FinalVictory = QStringLiteral("STAGE_FINAL_VICTORY");
 } // namespace Stage

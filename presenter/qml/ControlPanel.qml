@@ -86,7 +86,7 @@ ColumnLayout {
     TextField {
         id: answerField
         Layout.fillWidth: true
-        placeholderText: qsTr("Type answer…")
+        placeholderText: qsTr("Мой ответ…")
         color: PresenterTheme.textPrimary
         placeholderTextColor: PresenterTheme.textSecondary
         background: Rectangle {

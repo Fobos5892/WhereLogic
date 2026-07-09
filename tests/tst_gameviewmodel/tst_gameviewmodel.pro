@@ -16,7 +16,6 @@ SOURCES += \
     ../../game/src/core/UiStringDefaults.cpp \
     ../../game/src/models/DatabaseManager.cpp \
     ../../game/src/models/NetworkServer.cpp \
-    ../../game/src/models/TriggerParser.cpp \
     ../../game/src/viewmodels/GameViewModel.cpp
 
 HEADERS += \

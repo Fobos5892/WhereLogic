@@ -42,4 +42,14 @@ ColumnLayout {
         font.pixelSize: PresenterTheme.fontSizeBody
         wrapMode: Text.WordWrap
     }
+
+    Label {
+        Layout.fillWidth: true
+        visible: viewModel.roundRule.length > 0
+        text: viewModel.roundRule
+        color: PresenterTheme.textSecondary
+        font.pixelSize: PresenterTheme.fontSizeCaption
+        font.italic: true
+        wrapMode: Text.WordWrap
+    }
 }

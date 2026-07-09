@@ -1,5 +1,8 @@
 TEMPLATE = subdirs
 
+# Subprojects without dependencies can build in parallel when make uses -jN.
+# game waits for opencv_external (see below); presenter/tests/setup can run alongside game.
+
 SUBDIRS = \
     game \
     presenter \

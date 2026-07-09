@@ -7,7 +7,7 @@ Item {
 
     Column {
         anchors.centerIn: parent
-        width: Math.min(parent.width * 0.75, 520)
+        width: parent.width * 0.75
         spacing: Theme.spacing * 1.5
 
         Text {
@@ -19,20 +19,22 @@ Item {
             horizontalAlignment: Text.AlignHCenter
         }
 
-        GameTextField {
+        EditorBoundField {
             id: teamAField
             width: parent.width
             fillWidth: true
+            reloadKey: gameViewModel.currentPresetId
+            readValue: function() { return gameViewModel.teamAName }
             placeholderText: gameViewModel.label("ui.team_setup.team_a")
-            text: gameViewModel.teamAName
         }
 
-        GameTextField {
+        EditorBoundField {
             id: teamBField
             width: parent.width
             fillWidth: true
+            reloadKey: gameViewModel.currentPresetId
+            readValue: function() { return gameViewModel.teamBName }
             placeholderText: gameViewModel.label("ui.team_setup.team_b")
-            text: gameViewModel.teamBName
         }
 
         GameButton {
@@ -40,7 +42,13 @@ Item {
             fillWidth: true
             text: gameViewModel.label("ui.team_setup.go")
             gold: true
-            onClicked: gameViewModel.configureTeams(teamAField.text, teamBField.text)
+            onClicked: {
+                teamAField.commitInput()
+                teamBField.commitInput()
+                teamAField.focus = false
+                teamBField.focus = false
+                gameViewModel.configureTeams(teamAField.text, teamBField.text)
+            }
         }
     }
 }

@@ -4,11 +4,11 @@ import ".."
 FocusScope {
     id: scope
 
-    property bool enabled: true
+    property bool autosaveEnabled: true
     property var onSave: null
 
     function requestSave() {
-        if (!scope.enabled || !scope.onSave)
+        if (!scope.autosaveEnabled || !scope.onSave)
             return
         scope.onSave()
     }

@@ -5,7 +5,7 @@ Item {
     id: root
 
     property bool running: true
-    property int size: 36
+    property int size: Theme.iconLg * 1.5
 
     implicitWidth: size
     implicitHeight: size
@@ -23,7 +23,7 @@ Item {
         RotationAnimation on rotation {
             from: 0
             to: 360
-            duration: 850
+            duration: Theme.animNormal * 2
             loops: Animation.Infinite
             running: root.running && root.visible
         }

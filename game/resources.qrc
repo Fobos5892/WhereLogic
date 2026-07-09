@@ -17,6 +17,7 @@
         <file>qml/components/GameButton.qml</file>
         <file>qml/components/GameTextField.qml</file>
         <file>qml/components/SettingsTextField.qml</file>
+        <file>qml/components/EditorBoundField.qml</file>
         <file>qml/components/EditorAutoSaveScope.qml</file>
         <file>qml/components/GameComboBox.qml</file>
         <file>qml/components/NeonPanel.qml</file>
@@ -24,6 +25,7 @@
         <file>qml/components/GameCard.qml</file>
         <file>qml/components/SmartTimer.qml</file>
         <file>qml/components/ScoreHUD.qml</file>
+        <file>qml/components/CometBorder.qml</file>
         <file>qml/components/MissingRevealOverlay.qml</file>
         <file>qml/components/MaskRegionSelector.qml</file>
         <file>qml/components/MaskContourOverlay.qml</file>
@@ -46,6 +48,7 @@
         <file>qml/assets/icon-restore.svg</file>
         <file>qml/assets/icon-add.svg</file>
         <file>qml/assets/slot-empty.svg</file>
+        <file>qml/assets/card-back.svg</file>
         <file>qml/assets/slot-add-wide.svg</file>
         <file>qml/assets/spinner.svg</file>
         <file>qml/components/layouts/StandardGridLayout.qml</file>
@@ -55,7 +58,6 @@
         <file>qml/components/layouts/TextOnlyLayout.qml</file>
         <file>qml/components/layouts/BlitzGridLayout.qml</file>
         <file>qml/components/layouts/SingleHybridLayout.qml</file>
-        <file alias="config/ai_manifest.json">../config/ai_manifest.json</file>
         <file alias="config/ui_defaults_ru.json">../config/ui_defaults_ru.json</file>
     </qresource>
 </RCC>

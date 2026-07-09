@@ -16,7 +16,6 @@ SOURCES += \
     ../../game/src/core/UiStringDefaults.cpp \
     ../../game/src/models/DatabaseManager.cpp \
     ../../game/src/models/NetworkServer.cpp \
-    ../../game/src/models/TriggerParser.cpp \
     ../../game/src/viewmodels/GameViewModel.cpp
 
 HEADERS += \
@@ -25,7 +24,6 @@ HEADERS += \
     ../../game/src/core/UiStringDefaults.h \
     ../../game/src/models/DatabaseManager.h \
     ../../game/src/models/NetworkServer.h \
-    ../../game/src/models/TriggerParser.h \
     ../../game/src/viewmodels/GameViewModel.h
 
 include(../../third_party/httpserver.pri)

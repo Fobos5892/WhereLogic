@@ -10,8 +10,16 @@ Flipable {
     property bool hideAnswer: false
     property bool answerRevealed: false
 
-    width: 140
-    height: 180
+    readonly property real cardAspect: Theme.cardAspect
+    readonly property string slotImageUrl: gameViewModel.currentPuzzleId > 0
+            ? (flip.cardIndex === 0
+               ? gameViewModel.puzzleSlot0DisplayUrl
+               : gameViewModel.puzzleImageUrl(flip.cardIndex))
+            : ""
+
+    implicitWidth: Theme.slotSize * 3.6
+    implicitHeight: implicitWidth / cardAspect
+    clip: true
 
     transform: Rotation {
         origin.x: flip.width / 2
@@ -23,118 +31,128 @@ Flipable {
         }
     }
 
-    front: Rectangle {
-        radius: Theme.radius
-        color: Theme.cardBack
-        border.color: Theme.secondary
-        border.width: Theme.borderWidth
+    front: Item {
+        anchors.fill: parent
 
-        Column {
-            anchors.centerIn: parent
-            spacing: 8
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "?"
-                font.pixelSize: 48
-                font.bold: true
-                color: Theme.primary
-            }
-            Repeater {
-                model: 3
-                Rectangle {
-                    width: 60
-                    height: 3
-                    radius: 1
-                    color: Theme.secondary
-                    opacity: 0.5
-                    anchors.horizontalCenter: parent.horizontalCenter
-                }
-            }
+        Image {
+            anchors.fill: parent
+            source: "qrc:/qml/assets/card-back.svg"
+            fillMode: Image.PreserveAspectCrop
+            smooth: true
+            antialiasing: true
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: Theme.radius
+            color: "transparent"
+            border.color: Theme.secondary
+            border.width: Theme.borderWidth
         }
     }
 
-    back: Rectangle {
-        radius: Theme.radius
-        color: Theme.cardFront
-        border.color: Theme.primary
-        border.width: Theme.borderWidth
+    back: Item {
+        anchors.fill: parent
 
-        Image {
-            id: cardImage
+        transform: Rotation {
+            origin.x: flip.width / 2
+            origin.y: flip.height / 2
+            axis { x: 0; y: 1; z: 0 }
+            angle: 180
+        }
+
+        Rectangle {
             anchors.fill: parent
-            anchors.margins: 8
-            source: gameViewModel.currentPuzzleId > 0
-                    ? (flip.cardIndex === 0
-                       ? gameViewModel.puzzleSlot0DisplayUrl
-                       : gameViewModel.puzzleImageUrl(flip.cardIndex))
-                    : ""
-            fillMode: Image.PreserveAspectFit
-            cache: false
-            opacity: flip.hideAnswer
-                     ? (flip.answerRevealed ? (status === Image.Loading ? 0.35 : 1) : 0)
-                     : ((status === Image.Ready && source.length > 0)
-                        ? (status === Image.Loading ? 0.35 : 1)
-                        : 0)
-            Behavior on opacity {
-                NumberAnimation {
-                    duration: Theme.animNormal * 1.5
-                    easing.type: Easing.InOutCubic
+            radius: Theme.radius
+            color: Theme.cardFront
+            border.color: Theme.primary
+            border.width: Theme.borderWidth
+            clip: true
+
+            Image {
+                id: cardImage
+                anchors.fill: parent
+                anchors.margins: Theme.cardImageMargin
+                source: flip.slotImageUrl
+                fillMode: Image.PreserveAspectFit
+                cache: false
+                asynchronous: true
+                visible: !flip.hideAnswer || flip.answerRevealed
+                opacity: cardImage.status === Image.Ready ? 1
+                         : (cardImage.status === Image.Loading ? 0.35 : 0)
+                Behavior on opacity {
+                    NumberAnimation {
+                        duration: Theme.animNormal * 1.5
+                        easing.type: Easing.InOutCubic
+                    }
                 }
             }
-        }
 
-        Image {
-            id: cardSpinner
-            anchors.centerIn: parent
-            width: 40
-            height: 40
-            visible: cardImage.status === Image.Loading
-                     && (flip.hideAnswer ? flip.answerRevealed : !flip.hideAnswer)
-            source: "qrc:/qml/assets/spinner.svg"
-            fillMode: Image.PreserveAspectFit
-            transformOrigin: Item.Center
-            RotationAnimation on rotation {
-                from: 0
-                to: 360
-                duration: 850
-                loops: Animation.Infinite
-                running: cardSpinner.visible
+            Image {
+                id: cardPlaceholder
+                anchors.centerIn: parent
+                width: parent.width * 0.42
+                height: width / cardAspect
+                visible: (!flip.hideAnswer || flip.answerRevealed)
+                         && cardImage.status !== Image.Ready
+                         && cardImage.status !== Image.Loading
+                source: "qrc:/qml/assets/card-back.svg"
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                opacity: 0.55
             }
-        }
 
-        Text {
-            id: hiddenAnswerMark
-            anchors.centerIn: parent
-            width: parent.width - 16
-            visible: flip.hideAnswer
-                     && (!flip.answerRevealed
-                         || opacity > 0.01)
-            text: "?"
-            color: Theme.primary
-            font.pixelSize: Theme.fontSizeHero
-            font.bold: true
-            horizontalAlignment: Text.AlignHCenter
-            opacity: flip.hideAnswer ? (flip.answerRevealed ? 0 : 1) : 0
-            Behavior on opacity {
-                NumberAnimation {
-                    duration: Theme.animNormal * 1.5
-                    easing.type: Easing.InOutCubic
+            Image {
+                id: cardSpinner
+                anchors.centerIn: parent
+                width: Theme.iconLg * 1.5
+                height: width
+                visible: cardImage.status === Image.Loading
+                         && (!flip.hideAnswer || flip.answerRevealed)
+                source: "qrc:/qml/assets/spinner.svg"
+                fillMode: Image.PreserveAspectFit
+                transformOrigin: Item.Center
+                RotationAnimation on rotation {
+                    from: 0
+                    to: 360
+                    duration: Theme.animNormal * 2
+                    loops: Animation.Infinite
+                    running: cardSpinner.visible
                 }
             }
-        }
 
-        Text {
-            anchors.centerIn: parent
-            width: parent.width - 16
-            visible: !flip.hideAnswer
-                     && cardImage.status !== Image.Ready
-                     && cardImage.status !== Image.Loading
-            text: flip.label || gameViewModel.label("ui.card.default_format").arg(flip.cardIndex + 1)
-            color: Theme.textOnAccent
-            font.pixelSize: Theme.fontSizeCaption
-            font.bold: true
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
+            Image {
+                id: hiddenAnswerMark
+                anchors.centerIn: parent
+                width: parent.width * 0.38
+                height: width / cardAspect
+                visible: flip.hideAnswer
+                         && (!flip.answerRevealed || opacity > 0.01)
+                source: "qrc:/qml/assets/card-back.svg"
+                fillMode: Image.PreserveAspectFit
+                opacity: flip.hideAnswer ? (flip.answerRevealed ? 0 : 1) : 0
+                Behavior on opacity {
+                    NumberAnimation {
+                        duration: Theme.animNormal * 1.5
+                        easing.type: Easing.InOutCubic
+                    }
+                }
+            }
+
+            Text {
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: Theme.spacing
+                width: parent.width - Theme.spacing * 2
+                visible: !flip.hideAnswer
+                         && cardImage.status !== Image.Ready
+                         && cardImage.status !== Image.Loading
+                text: flip.label || gameViewModel.label("ui.card.default_format").arg(flip.cardIndex + 1)
+                color: Theme.textOnAccent
+                font.pixelSize: Theme.fontSizeCaption
+                font.bold: true
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+            }
         }
     }
 }

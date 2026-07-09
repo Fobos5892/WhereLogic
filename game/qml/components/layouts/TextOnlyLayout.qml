@@ -18,7 +18,7 @@ Item {
 
                 Text {
                     width: parent.width
-                    height: 72
+                    implicitHeight: Theme.buttonHeight * 1.4
                     text: gameViewModel.cardsFaceUp && gameViewModel.quoteSlots.length > index
                           ? gameViewModel.quoteSlots[index]
                           : gameViewModel.label("ui.card.quote_format").arg(index + 1)

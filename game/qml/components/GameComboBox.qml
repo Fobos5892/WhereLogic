@@ -13,7 +13,7 @@ ComboBox {
     width: fillWidth && parent ? parent.width : implicitWidth
 
     background: Rectangle {
-        implicitWidth: 200
+        implicitWidth: Theme.w * 0.28
         implicitHeight: Theme.buttonHeight
         radius: Theme.radius
         color: Theme.surface
@@ -66,7 +66,7 @@ ComboBox {
     }
 
     popup: Popup {
-        y: control.height + 2
+        y: control.height + Theme.borderWidth
         width: control.width
         implicitHeight: Math.min(listView.contentHeight + padding * 2,
                                  Theme.buttonHeight * 6 + padding * 2)

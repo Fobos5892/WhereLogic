@@ -2,6 +2,8 @@
 
 #include "RestApiConstants.h"
 
+#include <initializer_list>
+
 PresenterViewModel::PresenterViewModel(QObject *parent)
     : QObject(parent)
     , m_connectionState(QStringLiteral("disconnected"))
@@ -115,14 +117,29 @@ void PresenterViewModel::setConnectionState(const QString &state)
 
 void PresenterViewModel::applyPuzzleState(const QJsonObject &puzzle)
 {
-    const auto setString = [puzzle](const char *key) {
+    const auto valueString = [puzzle](const char *key) {
         return puzzle.value(QString::fromLatin1(key)).toString();
     };
+    const auto firstNonEmptyString = [valueString](std::initializer_list<const char *> keys) {
+        for (const char *key : keys) {
+            const QString value = valueString(key);
+            if (!value.isEmpty()) {
+                return value;
+            }
+        }
+        return QString();
+    };
 
-    const QString roundTitle = setString("round_title");
+    const QString roundTitle = valueString("round_title");
     if (m_roundTitle != roundTitle) {
         m_roundTitle = roundTitle;
         emit roundTitleChanged();
+    }
+
+    const QString roundRule = firstNonEmptyString({"round_rule", "rule_text"});
+    if (m_roundRule != roundRule) {
+        m_roundRule = roundRule;
+        emit roundRuleChanged();
     }
 
     const int puzzleNum = puzzle.value(QStringLiteral("puzzle_num")).toInt();
@@ -131,43 +148,43 @@ void PresenterViewModel::applyPuzzleState(const QJsonObject &puzzle)
         emit puzzleNumChanged();
     }
 
-    const QString activeTeam = setString("active_team");
+    const QString activeTeam = valueString("active_team");
     if (m_activeTeam != activeTeam) {
         m_activeTeam = activeTeam;
         emit activeTeamChanged();
     }
 
-    const QString gameStage = setString("game_stage");
+    const QString gameStage = valueString("game_stage");
     if (m_gameStage != gameStage) {
         m_gameStage = gameStage;
         emit gameStageChanged();
     }
 
-    const QString layoutType = setString("layout_type");
+    const QString layoutType = valueString("layout_type");
     if (m_layoutType != layoutType) {
         m_layoutType = layoutType;
         emit layoutTypeChanged();
     }
 
-    const QString hintText = setString("hint_text");
+    const QString hintText = firstNonEmptyString({"hint_text", "hint"});
     if (m_hintText != hintText) {
         m_hintText = hintText;
         emit hintTextChanged();
     }
 
-    const QString submittedAnswer = setString("submitted_answer");
+    const QString submittedAnswer = valueString("submitted_answer");
     if (m_submittedAnswer != submittedAnswer) {
         m_submittedAnswer = submittedAnswer;
         emit submittedAnswerChanged();
     }
 
-    const QString missingRevealText = setString("missing_reveal_text");
+    const QString missingRevealText = valueString("missing_reveal_text");
     if (m_missingRevealText != missingRevealText) {
         m_missingRevealText = missingRevealText;
         emit missingRevealTextChanged();
     }
 
-    const QString correctAnswerText = setString("correct_answer_text");
+    const QString correctAnswerText = firstNonEmptyString({"correct_answer_text", "correct_answer"});
     if (m_correctAnswerText != correctAnswerText) {
         m_correctAnswerText = correctAnswerText;
         emit correctAnswerTextChanged();
