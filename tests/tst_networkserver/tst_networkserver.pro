@@ -7,6 +7,7 @@ CONFIG -= app_bundle
 TEMPLATE = app
 
 INCLUDEPATH += \
+    .. \
     ../../game/src \
     ../../shared/api
 

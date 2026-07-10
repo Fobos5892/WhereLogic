@@ -1,6 +1,6 @@
 #include <QtTest>
-#include <QStandardPaths>
 
+#include "TestEnvironment.h"
 #include "models/DatabaseManager.h"
 #include "models/NetworkServer.h"
 #include "viewmodels/GameViewModel.h"
@@ -10,11 +10,6 @@ class TestNetworkServer : public QObject
     Q_OBJECT
 
 private slots:
-    void initTestCase()
-    {
-        QStandardPaths::setTestModeEnabled(true);
-    }
-
     void testPinGenerated()
     {
         DatabaseManager db;
@@ -31,5 +26,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestNetworkServer)
+WHERLOGIC_QTEST_MAIN(TestNetworkServer)
 #include "tst_networkserver.moc"

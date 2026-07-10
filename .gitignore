@@ -31,6 +31,7 @@ Makefile*
 *build-*
 build/
 build/models/
+dist/
 .qtcreator/
 Thumbs.db
 Desktop.ini

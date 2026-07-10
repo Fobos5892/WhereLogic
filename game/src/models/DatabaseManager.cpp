@@ -590,8 +590,8 @@ bool DatabaseManager::normalizePuzzleHintKeys()
             return false;
         }
 
-        if (!upsertLocalized(targetKey, QStringLiteral("ru"), ru)
-            || !upsertLocalized(targetKey, QStringLiteral("en"), en)) {
+        if ((!ru.isEmpty() && !upsertLocalized(targetKey, QStringLiteral("ru"), ru))
+            || (!en.isEmpty() && !upsertLocalized(targetKey, QStringLiteral("en"), en))) {
             db.rollback();
             return false;
         }
@@ -647,8 +647,7 @@ bool DatabaseManager::scrubImportedDemoPuzzleHints()
         const QString hintKey = QStringLiteral("puzzle.hint.p%1").arg(puzzleId);
         QSqlQuery clearRu(db);
         clearRu.prepare(QStringLiteral(
-            "UPDATE localization_strings SET translated_text = '' "
-            "WHERE string_key = ? AND lang_code = 'ru'"));
+            "DELETE FROM localization_strings WHERE string_key = ? AND lang_code = 'ru'"));
         clearRu.addBindValue(hintKey);
         if (!clearRu.exec()) {
             emit databaseError(clearRu.lastError().text());
@@ -657,8 +656,7 @@ bool DatabaseManager::scrubImportedDemoPuzzleHints()
 
         QSqlQuery clearEn(db);
         clearEn.prepare(QStringLiteral(
-            "UPDATE localization_strings SET translated_text = '' "
-            "WHERE string_key = ? AND lang_code = 'en'"));
+            "DELETE FROM localization_strings WHERE string_key = ? AND lang_code = 'en'"));
         clearEn.addBindValue(hintKey);
         if (!clearEn.exec()) {
             emit databaseError(clearEn.lastError().text());
@@ -1141,7 +1139,7 @@ bool DatabaseManager::clearDefaultPuzzlePlaceholders(int roundId)
 
     QSqlQuery clearHints(db);
     clearHints.prepare(QStringLiteral(
-        "UPDATE localization_strings SET translated_text = '' "
+        "DELETE FROM localization_strings "
         "WHERE lang_code IN ('ru', 'en') AND translated_text = ? "
         "AND string_key IN (SELECT hint_text_key FROM puzzles WHERE round_id = ?)"));
     clearHints.addBindValue(QStringLiteral("Подсказка"));

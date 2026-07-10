@@ -1,6 +1,6 @@
 #include <QtTest>
-#include <QStandardPaths>
 
+#include "TestEnvironment.h"
 #include "models/DatabaseManager.h"
 
 class TestDatabaseManager : public QObject
@@ -8,22 +8,21 @@ class TestDatabaseManager : public QObject
     Q_OBJECT
 
 private slots:
-    void initTestCase()
-    {
-        QStandardPaths::setTestModeEnabled(true);
-    }
-
     void testInitialize()
     {
         DatabaseManager db;
-        QVERIFY(db.initialize());
+        QString err;
+        QObject::connect(&db, &DatabaseManager::databaseError, [&](const QString &m) { err = m; });
+        QVERIFY2(db.initialize(), qPrintable(err.isEmpty() ? QStringLiteral("unknown error") : err));
         QVERIFY(!db.databasePath().isEmpty());
     }
 
     void testSeedPreset()
     {
         DatabaseManager db;
-        QVERIFY(db.initialize());
+        QString err;
+        QObject::connect(&db, &DatabaseManager::databaseError, [&](const QString &m) { err = m; });
+        QVERIFY2(db.initialize(), qPrintable(err.isEmpty() ? QStringLiteral("unknown error") : err));
 
         const QVector<GamePresetInfo> presets = db.listPresets();
         QVERIFY(!presets.isEmpty());
@@ -33,5 +32,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestDatabaseManager)
+WHERLOGIC_QTEST_MAIN(TestDatabaseManager)
 #include "tst_databasemanager.moc"

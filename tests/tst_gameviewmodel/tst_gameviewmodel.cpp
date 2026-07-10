@@ -1,6 +1,6 @@
 #include <QtTest>
-#include <QStandardPaths>
 
+#include "TestEnvironment.h"
 #include "core/GameConstants.h"
 #include "models/DatabaseManager.h"
 #include "viewmodels/GameViewModel.h"
@@ -10,11 +10,6 @@ class TestGameViewModel : public QObject
     Q_OBJECT
 
 private slots:
-    void initTestCase()
-    {
-        QStandardPaths::setTestModeEnabled(true);
-    }
-
     void testStartGameMovesToTeamSetup()
     {
         DatabaseManager db;
@@ -43,5 +38,5 @@ private slots:
     }
 };
 
-QTEST_MAIN(TestGameViewModel)
+WHERLOGIC_QTEST_MAIN(TestGameViewModel)
 #include "tst_gameviewmodel.moc"

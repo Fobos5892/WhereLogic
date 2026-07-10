@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      package_release:
+        description: Build OpenCV, package portable ZIP, upload artifact
+        type: boolean
+        default: false
+
+env:
+  QT_VERSION: "6.11.1"
+  BUILD_DIR: build-ci
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Decide release build
+        id: mode
+        shell: pwsh
+        run: |
+          $release = $false
+          if ("${{ github.event_name }}" -eq "release") { $release = $true }
+          elseif ("${{ github.ref }}" -match '^refs/tags/v') { $release = $true }
+          elseif ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.package_release }}" -eq "true") {
+            $release = $true
+          }
+          "release=$release" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if ($release) {
+            Write-Host "Release mode: OpenCV + portable ZIP"
+          } else {
+            Write-Host "CI mode: fast build with CONFIG+=no_opencv"
+          }
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_mingw
+          modules: qthttpserver qtmultimedia
+          tools: tools_mingw tools_cmake tools_ninja
+          cache: true
+          add-tools-to-path: true
+
+      - name: Cache OpenCV prebuilt
+        if: steps.mode.outputs.release == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            external/WhereLogicOpenCV/prebuilt
+            external/WhereLogicOpenCV/.build
+          key: opencv-mingw-${{ hashFiles('external/WhereLogicOpenCV/manifest.json', 'external/WhereLogicOpenCV/scripts/build_qt_mingw.ps1') }}
+          restore-keys: |
+            opencv-mingw-
+
+      - name: Build and test
+        shell: pwsh
+        run: |
+          $args = @(
+            "-Configuration", "release",
+            "-BuildDir", "${{ env.BUILD_DIR }}",
+            "-RunTests"
+          )
+          if ("${{ steps.mode.outputs.release }}" -ne "true") {
+            $args += "-NoOpenCV"
+          }
+          & ./scripts/ci_build.ps1 @args
+
+      - name: Package release archive
+        if: steps.mode.outputs.release == 'true'
+        shell: pwsh
+        run: |
+          $version = "${{ github.event.release.tag_name }}"
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            $version = "${{ github.ref_name }}"
+          }
+          & ./scripts/package_release.ps1 -Version $version -BuildDir "${{ env.BUILD_DIR }}"
+
+      - name: Upload portable ZIP artifact
+        if: steps.mode.outputs.release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: WhereLogicGame-win64-portable
+          path: |
+            dist/WhereLogicGame-*-win64-portable.zip
+            dist/WhereLogicGame-*-win64-portable.zip.sha256
+          if-no-files-found: error
+
+      - name: Upload to GitHub Release
+        if: steps.mode.outputs.release == 'true' && (startsWith(github.ref, 'refs/tags/') || github.event_name == 'release')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name || github.ref_name }}
+          files: |
+            dist/WhereLogicGame-*-win64-portable.zip
+            dist/WhereLogicGame-*-win64-portable.zip.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
