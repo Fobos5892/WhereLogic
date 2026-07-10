@@ -45,9 +45,15 @@ jobs:
             Write-Host "CI mode: fast build with CONFIG+=no_opencv"
           }
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
+          setup-python: false
           version: ${{ env.QT_VERSION }}
           host: windows
           target: desktop
@@ -56,6 +62,8 @@ jobs:
           tools: tools_mingw tools_cmake tools_ninja
           cache: true
           add-tools-to-path: true
+          # aqt 3.3.0 cannot install Qt 6.11+ on Windows (repo layout change)
+          aqtsource: git+https://github.com/miurahr/aqtinstall.git@refs/pull/1000/head
 
       - name: Cache OpenCV prebuilt
         if: steps.mode.outputs.release == 'true'

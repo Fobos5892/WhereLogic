@@ -44,7 +44,17 @@ try {
         Write-Host "Bundle from $($manifest.created) on $($manifest.machine)"
     }
 
-    $ProjectSrc = Join-Path $BundleRoot "project"
+    $ProjectSrc = $null
+    foreach ($name in @("WhereLogic", "project", "repo")) {
+        $candidate = Join-Path $BundleRoot $name
+        if (Test-Path (Join-Path $candidate "WhereLogic.pro")) {
+            $ProjectSrc = $candidate
+            break
+        }
+    }
+    if (-not $ProjectSrc) {
+        throw "No source tree in archive (expected WhereLogic/ with WhereLogic.pro)"
+    }
     $PortableSrc = Join-Path $BundleRoot "portable"
     $UserSrc = Join-Path $BundleRoot "userdata"
 
@@ -56,7 +66,7 @@ try {
         Copy-Item $ProjectSrc $Target -Recurse -Force
         Write-Host "Project restored: $Target"
     } else {
-        Write-Warning "No project/ in archive - only portable/userdata if present."
+        Write-Warning "No WhereLogic/ source folder in archive - only portable/userdata if present."
     }
 
     if (Test-Path (Join-Path $PortableSrc "WhereLogicGame.exe")) {

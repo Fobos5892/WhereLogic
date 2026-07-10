@@ -1,10 +1,10 @@
-# WhereLogic — portable package for another PC (no Qt/OpenCV/MSYS2 install required)
+# WhereLogic - portable package for another PC (no Qt/OpenCV/MSYS2 install required)
 #
 # Usage (from repo root, after Release build):
 #   powershell -ExecutionPolicy Bypass -File scripts/package_portable.ps1
 #   powershell -ExecutionPolicy Bypass -File scripts/package_portable.ps1 -ExePath "build\...\release\WhereLogicGame.exe"
 #
-# Output: dist/WhereLogicGame-portable/  — copy this entire folder to another PC.
+# Output: dist/WhereLogicGame-portable/ - copy this entire folder to another PC.
 
 param(
     [string]$ExePath = "",
@@ -16,13 +16,23 @@ $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
 function Find-GameExe {
     if ($ExePath -and (Test-Path $ExePath)) { return (Resolve-Path $ExePath).Path }
-    $candidates = Get-ChildItem -Path (Join-Path $Root "build") -Filter "WhereLogicGame.exe" -Recurse -ErrorAction SilentlyContinue |
-        Where-Object { $_.FullName -match "\\release\\" -or $_.FullName -match "\\Release\\" } |
-        Sort-Object LastWriteTime -Descending
-    if ($candidates) { return $candidates[0].FullName }
-    $candidates = Get-ChildItem -Path (Join-Path $Root "build") -Filter "WhereLogicGame.exe" -Recurse -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending
-    if ($candidates) { return $candidates[0].FullName }
+    $searchRoots = @(
+        (Join-Path $Root "build"),
+        (Join-Path $Root "build-ci")
+    )
+    foreach ($searchRoot in $searchRoots) {
+        if (-not (Test-Path $searchRoot)) { continue }
+        $candidates = Get-ChildItem -Path $searchRoot -Filter "WhereLogicGame.exe" -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\release\\" -or $_.FullName -match "\\Release\\" } |
+            Sort-Object LastWriteTime -Descending
+        if ($candidates) { return $candidates[0].FullName }
+    }
+    foreach ($searchRoot in $searchRoots) {
+        if (-not (Test-Path $searchRoot)) { continue }
+        $candidates = Get-ChildItem -Path $searchRoot -Filter "WhereLogicGame.exe" -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending
+        if ($candidates) { return $candidates[0].FullName }
+    }
     return $null
 }
 
@@ -59,7 +69,7 @@ if ($windeploy) {
     Write-Host "Running windeployqt..."
     & $windeploy --release --qmldir $qmlDir (Join-Path $OutDir "WhereLogicGame.exe")
 } else {
-    Write-Warning "windeployqt not in PATH — copy Qt DLLs manually or add Qt bin to PATH."
+    Write-Warning "windeployqt not in PATH - copy Qt DLLs manually or add Qt bin to PATH."
 }
 
 # OpenCV runtime (if built with HAS_OPENCV)
@@ -91,7 +101,7 @@ foreach ($name in $mingwDlls) {
     }
 }
 
-# Optional MSYS2 OpenCV dependencies — not needed for Qt-built WhereLogicOpenCV
+# Optional MSYS2 OpenCV dependencies - not needed for Qt-built WhereLogicOpenCV
 $msysBin = "C:\msys64\mingw64\bin"
 if (Test-Path $msysBin) {
     $extra = @("libjpeg-*.dll", "libpng*.dll", "libtiff-*.dll", "libwebp-*.dll", "zlib1.dll", "libopenjp2-*.dll")
