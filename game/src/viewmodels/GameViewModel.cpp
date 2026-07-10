@@ -342,6 +342,7 @@ void GameViewModel::resumeSession()
     m_roundScoreTeamA = m_state.roundScoreTeamA;
     m_roundScoreTeamB = m_state.roundScoreTeamB;
     emit roundScoreChanged();
+    emit roundProgressChanged();
     emit teamsChanged();
 
     if (m_stage == GameConstants::Stage::MainTurn) {
@@ -380,6 +381,26 @@ void GameViewModel::resumeSession()
     persistState();
 }
 
+void GameViewModel::resetAllStoredScores()
+{
+    m_roundScoreTeamA = 0;
+    m_roundScoreTeamB = 0;
+    m_totalScoreTeamA = 0;
+    m_totalScoreTeamB = 0;
+    m_lastSettledRoundIndex = -1;
+    m_teamAId = 0;
+    m_teamBId = 0;
+    m_teamAName.clear();
+    m_teamBName.clear();
+
+    if (m_database) {
+        m_database->clearTeams();
+    }
+
+    emit roundScoreChanged();
+    emit teamsChanged();
+}
+
 void GameViewModel::clearSession()
 {
     stopTimer();
@@ -389,13 +410,7 @@ void GameViewModel::clearSession()
     m_currentPuzzles.clear();
     m_roundIndex = 0;
     m_puzzleIndex = 0;
-    m_roundScoreTeamA = 0;
-    m_roundScoreTeamB = 0;
-    m_totalScoreTeamA = 0;
-    m_totalScoreTeamB = 0;
-    m_lastSettledRoundIndex = -1;
-    m_teamAName.clear();
-    m_teamBName.clear();
+    resetAllStoredScores();
     resetPuzzlePresentation();
     setStage(GameConstants::Stage::Welcome);
     setSubState(GameConstants::SubState::AwaitingReady);
@@ -406,16 +421,15 @@ void GameViewModel::clearSession()
     cleared.activeSession = false;
     m_state = cleared;
     m_database->saveGameState(cleared);
-    m_database->clearTeams();
 
     emit hasActiveSessionChanged(false);
-    emit roundScoreChanged();
-    emit teamsChanged();
     emit currentPresetIdChanged();
 }
 
 void GameViewModel::startGame(int presetId)
 {
+    resetAllStoredScores();
+
     m_presetId = presetId;
     m_rounds = m_database->listRoundsForPreset(presetId);
     if (m_rounds.isEmpty()) {
@@ -424,11 +438,6 @@ void GameViewModel::startGame(int presetId)
 
     m_roundIndex = 0;
     m_puzzleIndex = 0;
-    m_roundScoreTeamA = 0;
-    m_roundScoreTeamB = 0;
-    m_totalScoreTeamA = 0;
-    m_totalScoreTeamB = 0;
-    m_lastSettledRoundIndex = -1;
     m_hasActiveSession = true;
     m_activeTeam = GameConstants::TEAM_A;
     emit activeTeamChanged();
@@ -831,6 +840,7 @@ void GameViewModel::loadPersistedState()
         m_state.stage = GameConstants::Stage::Welcome;
         m_state.subState = GameConstants::SubState::AwaitingReady;
         m_database->saveGameState(m_state);
+        resetAllStoredScores();
     }
 
     setStage(GameConstants::Stage::Welcome);
@@ -1320,34 +1330,25 @@ void GameViewModel::settleRoundScores()
     persistState();
 }
 
-bool GameViewModel::shouldEndRoundEarly() const
+bool GameViewModel::shouldEndRoundEarlyAfterScoring(const QString &scoringTeam) const
 {
+    if (m_puzzleNumber != 5) {
+        return false;
+    }
+
     const int a = m_roundScoreTeamA;
     const int b = m_roundScoreTeamB;
-    if (a == b) {
-        return false;
+    if (scoringTeam == GameConstants::TEAM_A) {
+        return a == 5 && b == 3;
     }
-
-    const int lead = qMax(a, b);
-    const int trail = qMin(a, b);
-    if (lead >= GameConstants::MAX_ROUND_STARS) {
-        return true;
+    if (scoringTeam == GameConstants::TEAM_B) {
+        return b == 5 && a == 3;
     }
-
-    if (lead < 4 || trail > 3) {
-        return false;
-    }
-
-    const int gap = lead - trail;
-    return gap > 1 || (lead == 4 && trail == 3);
+    return false;
 }
 
 bool GameViewModel::tryCompleteRoundEarly()
 {
-    if (!shouldEndRoundEarly()) {
-        return false;
-    }
-
     stopTimer();
     resetPuzzlePresentation();
     m_cardsFaceUp = false;
@@ -1359,7 +1360,8 @@ bool GameViewModel::tryCompleteRoundEarly()
 
 void GameViewModel::proceedAfterScoring()
 {
-    if (tryCompleteRoundEarly()) {
+    const QString scoringTeam = m_activeTeam;
+    if (shouldEndRoundEarlyAfterScoring(scoringTeam) && tryCompleteRoundEarly()) {
         return;
     }
     advancePuzzleOrRound();

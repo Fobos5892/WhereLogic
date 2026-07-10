@@ -73,6 +73,74 @@ QString AdminViewModel::formatGroupedAnswerLabel(const QString &answer, const QL
     return QStringLiteral("%1 (%2)").arg(answer.trimmed(), parts.join(QStringLiteral(", ")));
 }
 
+QString AdminViewModel::puzzleEditorHint(const PuzzleInfo &puzzle) const
+{
+    if (!m_database || puzzle.id <= 0) {
+        return {};
+    }
+
+    const QString ownedKey = QStringLiteral("puzzle.hint.p%1").arg(puzzle.id);
+    const QString ownedHint = m_database->storedLocalizedString(ownedKey);
+    if (!ownedHint.isEmpty()) {
+        return ownedHint;
+    }
+
+    const QString key = puzzle.hintTextKey.trimmed();
+    if (key.isEmpty() || key == ownedKey) {
+        return {};
+    }
+
+    static const QRegularExpression ownedPattern(QStringLiteral("^puzzle\\.hint\\.p\\d+$"));
+    if (ownedPattern.match(key).hasMatch()) {
+        return m_database->storedLocalizedString(key);
+    }
+
+    return {};
+}
+
+void AdminViewModel::clearTransientEditorState()
+{
+    m_editAnswer.clear();
+    m_editHint.clear();
+    m_editQuotes.clear();
+    m_configCardTexts.clear();
+    m_editorMasks.clear();
+    m_answerOptions.clear();
+    m_sourceImage = QImage();
+    m_previewImage = QImage();
+    m_pendingImageBytes.clear();
+    bumpAnswerOptionsRevision();
+    emit cardTextsChanged();
+    emit editAnswerChanged();
+    emit editHintChanged();
+    emit editQuotesChanged();
+    emit masksChanged();
+    emit previewImageChanged();
+}
+
+void AdminViewModel::cancelPendingEditorJobs()
+{
+    ++m_regionJobId;
+    ++m_previewJobId;
+    if (m_maskProcessing) {
+        m_maskProcessing = false;
+        emit maskProcessingChanged();
+    }
+    if (m_processingJobs > 0) {
+        m_processingJobs = 0;
+        if (m_imageProcessing) {
+            m_imageProcessing = false;
+            emit imageProcessingChanged();
+        }
+    }
+}
+
+void AdminViewModel::bumpAnswerOptionsRevision()
+{
+    ++m_answerOptionsRevision;
+    emit answerOptionsChanged();
+}
+
 void AdminViewModel::regenerateGroupedAnswerOptions()
 {
     if (!isPhotoMaskRound()) {
@@ -102,7 +170,7 @@ void AdminViewModel::regenerateGroupedAnswerOptions()
     });
 
     m_answerOptions = grouped;
-    emit answerOptionsChanged();
+    bumpAnswerOptionsRevision();
 }
 
 void AdminViewModel::loadEditorMasks(int puzzleId)
@@ -403,14 +471,15 @@ void AdminViewModel::refreshEditorPreview()
     }
 
     const int jobId = ++m_previewJobId;
+    const int puzzleId = m_selectedPuzzleId;
     const QImage source = m_sourceImage;
     const QVector<EditorMaskEntry> masks = m_editorMasks;
     ImageProcessor *processor = m_imageProcessor;
     setImageProcessingBusy(true);
 
     auto *watcher = new QFutureWatcher<QImage>(this);
-    connect(watcher, &QFutureWatcher<QImage>::finished, this, [this, watcher, jobId]() {
-        if (jobId == m_previewJobId) {
+    connect(watcher, &QFutureWatcher<QImage>::finished, this, [this, watcher, jobId, puzzleId]() {
+        if (jobId == m_previewJobId && puzzleId == m_selectedPuzzleId) {
             const QImage result = watcher->result();
             m_previewImage = result.isNull() ? m_sourceImage : result;
             updatePreviewProvider();
@@ -749,7 +818,7 @@ int AdminViewModel::evaluateRoundTemplateStatus(int roundId) const
         }
     }
 
-    const bool hasHint = !m_database->localizedString(puzzle.hintTextKey).trimmed().isEmpty();
+    const bool hasHint = !puzzleEditorHint(puzzle).trimmed().isEmpty();
     const bool hasAny = hasAnswer || hasHint || filledQuotes > 0 || filledOptions > 0
                         || filledImages > 0 || hasMask;
     if (!hasAny) {
@@ -937,7 +1006,7 @@ void AdminViewModel::addAnswerOption()
         return;
     }
     m_answerOptions.append(QString());
-    emit answerOptionsChanged();
+    bumpAnswerOptionsRevision();
 }
 
 void AdminViewModel::removeAnswerOptionAt(int index)
@@ -946,7 +1015,7 @@ void AdminViewModel::removeAnswerOptionAt(int index)
         return;
     }
     m_answerOptions.removeAt(index);
-    emit answerOptionsChanged();
+    bumpAnswerOptionsRevision();
 }
 
 QString AdminViewModel::cardTextAt(int index) const
@@ -986,7 +1055,7 @@ void AdminViewModel::setAnswerOptionAt(int index, const QString &text)
         return;
     }
     m_answerOptions[index] = text;
-    emit answerOptionsChanged();
+    bumpAnswerOptionsRevision();
 }
 
 QString AdminViewModel::cardTextPlaceholder(int index) const
@@ -1110,17 +1179,19 @@ void AdminViewModel::selectPuzzle(int puzzleId)
     }
 
     ++m_editorGuardDepth;
-    if (m_selectedPuzzleId > 0) {
-        queuePuzzleSave(capturePuzzleSaveSnapshot(m_selectedPuzzleId), false);
+    const int outgoingPuzzleId = m_selectedPuzzleId;
+    if (outgoingPuzzleId > 0) {
+        queuePuzzleSave(capturePuzzleSaveSnapshot(outgoingPuzzleId), false);
     } else {
         cacheCurrentSlotState();
     }
 
+    cancelPendingEditorJobs();
+    clearTransientEditorState();
+
     m_selectedPuzzleId = puzzleId;
-    m_selectedImageSlot = 0;
-    emit selectedPuzzleIdChanged();
-    emit selectedImageSlotChanged();
     loadPuzzleEditor(puzzleId);
+    emit selectedPuzzleIdChanged();
     --m_editorGuardDepth;
 }
 
@@ -1524,7 +1595,9 @@ bool AdminViewModel::markMissingRegion(double relX, double relY, double relW, do
     }
 
     const int jobId = ++m_regionJobId;
+    const int puzzleId = m_selectedPuzzleId;
     const QImage source = m_sourceImage;
+    const int precision = m_maskPrecision;
     ImageProcessor *processor = m_imageProcessor;
     if (!m_maskProcessing) {
         m_maskProcessing = true;
@@ -1533,8 +1606,8 @@ bool AdminViewModel::markMissingRegion(double relX, double relY, double relW, do
     setStatusMessage(QStringLiteral("Обработка изображения…"));
 
     auto *watcher = new QFutureWatcher<QString>(this);
-    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, jobId]() {
-        if (jobId == m_regionJobId) {
+    connect(watcher, &QFutureWatcher<QString>::finished, this, [this, watcher, jobId, puzzleId]() {
+        if (jobId == m_regionJobId && puzzleId == m_selectedPuzzleId) {
             const QString contour = watcher->result();
             if (contour.isEmpty()) {
                 setStatusMessage(QStringLiteral("Не удалось выделить объект — обведите его рамкой"));
@@ -1546,6 +1619,9 @@ bool AdminViewModel::markMissingRegion(double relX, double relY, double relW, do
                 m_editorMasks.append(entry);
                 emit masksChanged();
                 regenerateGroupedAnswerOptions();
+                if (m_selectedPuzzleId > 0) {
+                    queuePuzzleSave(capturePuzzleSaveSnapshot(m_selectedPuzzleId), false);
+                }
                 if (m_imageProvider && m_selectedPuzzleId > 0) {
                     m_imageProvider->invalidatePuzzle(m_selectedPuzzleId);
                 }
@@ -1559,14 +1635,14 @@ bool AdminViewModel::markMissingRegion(double relX, double relY, double relW, do
         }
         watcher->deleteLater();
     });
-    watcher->setFuture(QtConcurrent::run([processor, source, relX, relY, relW, relH]() -> QString {
+    watcher->setFuture(QtConcurrent::run([processor, source, relX, relY, relW, relH, precision]() -> QString {
         if (!processor) {
             return {};
         }
         if (relW < 0.015 && relH < 0.015) {
-            return processor->extractContour(source, relX, relY, 24);
+            return processor->extractContour(source, relX, relY, 24, precision);
         }
-        return processor->extractContourInRect(source, relX, relY, relW, relH);
+        return processor->extractContourInRect(source, relX, relY, relW, relH, precision);
     }));
 
     return true;
@@ -1580,10 +1656,35 @@ void AdminViewModel::clearMask()
 
     m_editorMasks.clear();
     m_answerOptions.clear();
-    emit answerOptionsChanged();
+    bumpAnswerOptionsRevision();
     emit masksChanged();
     refreshEditorPreview();
     setStatusMessage(QStringLiteral("Все маски сброшены"));
+}
+
+void AdminViewModel::setMaskPrecision(int precision)
+{
+    const int clamped = std::clamp(precision, 1, 10);
+    if (m_maskPrecision == clamped) {
+        return;
+    }
+    m_maskPrecision = clamped;
+    emit maskPrecisionChanged();
+}
+
+QString AdminViewModel::maskPrecisionLabel() const
+{
+    QString bucketKey;
+    if (m_maskPrecision <= 3) {
+        bucketKey = QStringLiteral("ui.editor.mask_precision_bucket_soft");
+    } else if (m_maskPrecision <= 7) {
+        bucketKey = QStringLiteral("ui.editor.mask_precision_bucket_mid");
+    } else {
+        bucketKey = QStringLiteral("ui.editor.mask_precision_bucket_tight");
+    }
+    return label(QStringLiteral("ui.editor.mask_precision_value_format"))
+        .arg(m_maskPrecision)
+        .arg(label(bucketKey));
 }
 
 QString AdminViewModel::label(const QString &key) const
@@ -1695,8 +1796,11 @@ void AdminViewModel::loadPuzzleEditor(int puzzleId)
     m_slotImageCache.clear();
     m_slotPendingBytes.clear();
     preloadPuzzleSlotImages(puzzleId);
-    m_editAnswer = puzzle.correctAnswer;
-    m_editHint = m_database->localizedString(puzzle.hintTextKey);
+    m_editAnswer = puzzle.correctAnswer.trimmed();
+    if (m_editAnswer == QStringLiteral("Ответ")) {
+        m_editAnswer.clear();
+    }
+    m_editHint = puzzleEditorHint(puzzle);
     m_selectedTemplateId = puzzle.templateId;
 
     QStringList quotes;
@@ -1727,7 +1831,7 @@ void AdminViewModel::loadPuzzleEditor(int puzzleId)
         }
     }
     setHybridAnimationStyle(parseHybridAnimStyleFromCorrectOrder(puzzle.correctOrder));
-    emit answerOptionsChanged();
+    bumpAnswerOptionsRevision();
     emit cardTextsChanged();
 
     m_selectedImageSlot = 0;
@@ -1738,6 +1842,8 @@ void AdminViewModel::loadPuzzleEditor(int puzzleId)
     loadEditorMasks(puzzleId);
     regenerateGroupedAnswerOptions();
 
+    ++m_editorLoadRevision;
+    emit editorLoadRevisionChanged();
     emit editAnswerChanged();
     emit editHintChanged();
     emit editQuotesChanged();
@@ -1772,6 +1878,7 @@ void AdminViewModel::preloadPuzzleSlotImages(int puzzleId)
 
 void AdminViewModel::clearPuzzleEditor()
 {
+    cancelPendingEditorJobs();
     m_selectedPuzzleId = 0;
     m_selectedTemplateId = 0;
     m_selectedImageSlot = 0;
@@ -1798,11 +1905,13 @@ void AdminViewModel::clearPuzzleEditor()
     emit editAnswerChanged();
     emit editHintChanged();
     emit editQuotesChanged();
-    emit answerOptionsChanged();
+    bumpAnswerOptionsRevision();
     emit cardTextsChanged();
     emit masksChanged();
     emit previewImageChanged();
     emit puzzleImageChanged();
+    ++m_editorLoadRevision;
+    emit editorLoadRevisionChanged();
 }
 
 void AdminViewModel::setStatusMessage(const QString &message)

@@ -12,7 +12,7 @@ Item {
 
         Text {
             width: parent.width
-            text: gameViewModel.totalScoreTeamA === gameViewModel.totalScoreTeamB
+            text: gameViewModel.isGameTie
                   ? gameViewModel.label("ui.victory.title_tie")
                   : gameViewModel.label("ui.victory.title")
             color: Theme.gold
@@ -23,7 +23,7 @@ Item {
 
         Text {
             width: parent.width
-            text: gameViewModel.totalScoreTeamA === gameViewModel.totalScoreTeamB
+            text: gameViewModel.isGameTie
                   ? gameViewModel.label("ui.victory.tie")
                   : (gameViewModel.totalScoreTeamA > gameViewModel.totalScoreTeamB
                      ? gameViewModel.teamAName

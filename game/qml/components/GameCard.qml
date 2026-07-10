@@ -1,5 +1,6 @@
 import QtQuick
 import ".."
+import "."
 
 Flipable {
     id: flip
@@ -11,6 +12,7 @@ Flipable {
     property bool answerRevealed: false
 
     readonly property real cardAspect: Theme.cardAspect
+    readonly property real cardRadius: Theme.radius
     readonly property string slotImageUrl: gameViewModel.currentPuzzleId > 0
             ? (flip.cardIndex === 0
                ? gameViewModel.puzzleSlot0DisplayUrl
@@ -31,28 +33,19 @@ Flipable {
         }
     }
 
-    front: Item {
+    front: CyberBillboard {
         anchors.fill: parent
-
-        Image {
-            anchors.fill: parent
-            source: "qrc:/qml/assets/card-back.svg"
-            fillMode: Image.PreserveAspectCrop
-            smooth: true
-            antialiasing: true
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            radius: Theme.radius
-            color: "transparent"
-            border.color: Theme.secondary
-            border.width: Theme.borderWidth
-        }
+        cornerRadius: flip.cardRadius
+        glowColor: Theme.primary
+        panelColor: Theme.cardBack
+        panelOpacity: 1
+        svgSource: "qrc:/qml/assets/card-back.svg"
+        billboardGlow: false
     }
 
     back: Item {
         anchors.fill: parent
+        clip: true
 
         transform: Rotation {
             origin.x: flip.width / 2
@@ -61,13 +54,14 @@ Flipable {
             angle: 180
         }
 
-        Rectangle {
+        CyberBillboard {
+            id: backPanel
             anchors.fill: parent
-            radius: Theme.radius
-            color: Theme.cardFront
-            border.color: Theme.primary
-            border.width: Theme.borderWidth
-            clip: true
+            cornerRadius: flip.cardRadius
+            glowColor: Theme.primary
+            panelColor: Theme.cardFront
+            panelOpacity: 1
+            billboardGlow: true
 
             Image {
                 id: cardImage
@@ -99,6 +93,7 @@ Flipable {
                 source: "qrc:/qml/assets/card-back.svg"
                 fillMode: Image.PreserveAspectFit
                 smooth: true
+                asynchronous: true
                 opacity: 0.55
             }
 
@@ -111,6 +106,8 @@ Flipable {
                          && (!flip.hideAnswer || flip.answerRevealed)
                 source: "qrc:/qml/assets/spinner.svg"
                 fillMode: Image.PreserveAspectFit
+                smooth: true
+                asynchronous: true
                 transformOrigin: Item.Center
                 RotationAnimation on rotation {
                     from: 0
@@ -130,6 +127,8 @@ Flipable {
                          && (!flip.answerRevealed || opacity > 0.01)
                 source: "qrc:/qml/assets/card-back.svg"
                 fillMode: Image.PreserveAspectFit
+                smooth: true
+                asynchronous: true
                 opacity: flip.hideAnswer ? (flip.answerRevealed ? 0 : 1) : 0
                 Behavior on opacity {
                     NumberAnimation {

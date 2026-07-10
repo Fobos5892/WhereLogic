@@ -37,8 +37,10 @@ Item {
             if (coords.length !== 2) {
                 continue
             }
-            const x = layout.left + Number(coords[0]) * layout.pw
-            const y = layout.top + Number(coords[1]) * layout.ph
+            const relX = Math.max(0, Math.min(1, Number(coords[0])))
+            const relY = Math.max(0, Math.min(1, Number(coords[1])))
+            const x = layout.left + relX * layout.pw
+            const y = layout.top + relY * layout.ph
             path += (i === 0 ? "M " : " L ") + x + " " + y
         }
         return path.length > 0 ? path + " Z" : ""
@@ -46,6 +48,7 @@ Item {
 
     Shape {
         anchors.fill: parent
+        clip: true
         visible: root.contourPath().length > 0
         preferredRendererType: Shape.CurveRenderer
 

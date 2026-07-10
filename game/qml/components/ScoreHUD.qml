@@ -1,56 +1,79 @@
 import QtQuick
 import QtQuick.Layouts
 import ".."
+import "."
 
 Item {
-    implicitHeight: Math.round(Theme.topBarHeight * 0.9)
+    id: root
+    implicitHeight: Math.round(Theme.topBarHeight * 1.1)
 
-    Rectangle {
+    readonly property real hudMargin: Theme.spacing * 1.5
+    readonly property real teamPadH: Theme.spacing * 2.2
+    readonly property real teamPadV: Theme.spacing * 0.35
+    readonly property real teamPanelWidth: Math.round(Theme.w * 0.28)
+    readonly property real roundPanelWidth: Math.round(Theme.chromeSize * 2.0)
+    readonly property real roundPadV: Theme.spacing * 0.15
+
+    readonly property bool showRoundNumberOnly: {
+        if (!gameViewModel)
+            return true
+        const stage = gameViewModel.currentStage || ""
+        const rounds = gameViewModel.totalRounds || 0
+        return rounds <= 1
+                || stage === "STAGE_ROUND_ENDED"
+                || stage === "STAGE_FINAL_VICTORY"
+    }
+
+    CyberBillboard {
         anchors.fill: parent
-        radius: Theme.radius
-        color: Theme.surface
-        border.color: Theme.primary
-        border.width: Theme.borderWidth
-        opacity: 0.95
+        z: 0
+        cornerRadius: Theme.radius
+        glowColor: Theme.primary
+        panelColor: Theme.surface
+        panelOpacity: 0.95
+        billboardGlow: true
     }
 
     RowLayout {
+        z: 1
         anchors.fill: parent
-        anchors.margins: Theme.spacing * 0.35
-        spacing: Theme.spacing * 0.5
+        anchors.leftMargin: root.hudMargin
+        anchors.rightMargin: root.hudMargin
+        anchors.topMargin: Theme.spacing * 0.35
+        anchors.bottomMargin: Theme.spacing * 0.35
+        spacing: Theme.spacing * 0.55
 
-        Rectangle {
+        CyberBillboard {
             id: leftTeamBox
-            Layout.fillWidth: true
+            Layout.preferredWidth: root.teamPanelWidth
+            Layout.maximumWidth: root.teamPanelWidth
             Layout.fillHeight: true
             readonly property bool active: gameViewModel.activeTeam === "Team_A"
-            radius: Theme.radius * 0.75
-            color: active
-                   ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.3)
-                   : "transparent"
-            border.width: active ? Theme.borderWidth * 2 : Theme.borderWidth
-            border.color: active
-                          ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.75)
-                          : Qt.rgba(Theme.secondary.r, Theme.secondary.g, Theme.secondary.b, 0.35)
-            clip: true
-
-            CometBorder {
-                anchors.fill: parent
-                anchors.margins: Theme.borderWidth
-                running: leftTeamBox.active
-            }
+            cornerRadius: Theme.radius
+            glowColor: active ? Theme.primary : Theme.secondary
+            panelColor: active
+                        ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.22)
+                        : Qt.rgba(Theme.surfaceAlt.r, Theme.surfaceAlt.g, Theme.surfaceAlt.b, 0.35)
+            panelOpacity: 1
+            showComet: active
+            cometRunning: active
+            billboardGlow: active
 
             RowLayout {
                 anchors.fill: parent
-                anchors.margins: Theme.spacing * 0.35
-                spacing: Theme.spacing * 0.35
+                anchors.leftMargin: root.teamPadH
+                anchors.rightMargin: root.teamPadH
+                anchors.topMargin: root.teamPadV
+                anchors.bottomMargin: root.teamPadV
+                spacing: Theme.spacing * 0.5
 
                 Text {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: Theme.spacing * 3
                     text: gameViewModel.teamAName
-                    color: leftTeamBox.active ? Qt.lighter(Theme.primary, 1.35) : Theme.textSecondary
+                    color: leftTeamBox.active ? Qt.lighter(Theme.primary, 1.35) : Theme.textPrimary
                     font.bold: leftTeamBox.active
-                    font.pixelSize: Theme.fontSizeCaption
+                    font.pixelSize: Theme.fontSizeBody
                     elide: Text.ElideRight
                     maximumLineCount: 1
                 }
@@ -61,90 +84,90 @@ Item {
                 }
                 Text {
                     text: gameViewModel.label("ui.score.round_points_format").arg(gameViewModel.totalScoreTeamA)
-                    color: Theme.textSecondary
+                    color: Theme.textPrimary
                     font.pixelSize: Theme.fontSizeCaption
                 }
             }
         }
 
-        Rectangle {
-            Layout.preferredWidth: Math.round(Theme.chromeSize * 1.65)
+        Item { Layout.fillWidth: true; Layout.minimumWidth: Theme.spacing }
+
+        CyberBillboard {
+            Layout.preferredWidth: root.roundPanelWidth
+            Layout.maximumWidth: root.roundPanelWidth
             Layout.fillHeight: true
-            radius: Theme.radius * 0.75
-            color: Qt.rgba(Theme.surfaceAlt.r, Theme.surfaceAlt.g, Theme.surfaceAlt.b, 0.35)
-            border.width: Theme.borderWidth
-            border.color: Qt.rgba(Theme.secondary.r, Theme.secondary.g, Theme.secondary.b, 0.35)
+            cornerRadius: Theme.radius
+            glowColor: Theme.secondary
+            panelColor: Qt.rgba(Theme.surfaceAlt.r, Theme.surfaceAlt.g, Theme.surfaceAlt.b, 0.45)
+            panelOpacity: 1
+            billboardGlow: true
 
             ColumnLayout {
                 anchors.centerIn: parent
-                spacing: 0
+                width: parent.width - Theme.spacing
+                anchors.topMargin: root.roundPadV
+                anchors.bottomMargin: root.roundPadV
+                spacing: Theme.spacing * 0.06
 
                 Text {
                     Layout.alignment: Qt.AlignHCenter
+                    Layout.fillWidth: true
                     text: gameViewModel.label("ui.score.round_label")
-                    color: Theme.textSecondary
-                    font.pixelSize: Math.max(Theme.borderWidth * 4, Theme.fontSizeCaption - 2)
+                    color: Theme.textPrimary
+                    font.pixelSize: Math.max(Theme.borderWidth * 4, Theme.fontSizeCaption - 3)
                     font.letterSpacing: 1
+                    horizontalAlignment: Text.AlignHCenter
                 }
                 Text {
                     Layout.alignment: Qt.AlignHCenter
-                    text: gameViewModel.label("ui.score.round_progress_format")
-                            .arg(gameViewModel.currentRoundNumber)
-                            .arg(gameViewModel.totalRounds)
+                    Layout.fillWidth: true
+                    text: root.showRoundNumberOnly
+                          ? String(gameViewModel.currentRoundNumber || 1)
+                          : gameViewModel.label("ui.score.round_progress_format")
+                                .arg(gameViewModel.currentRoundNumber || 1)
+                                .arg(gameViewModel.totalRounds || 1)
                     color: Theme.gold
                     font.bold: true
-                    font.pixelSize: Theme.fontSizeBody
-                }
-                Text {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: gameViewModel.label("ui.score.question")
-                    color: Theme.textSecondary
-                    font.pixelSize: Math.max(Theme.borderWidth * 4, Theme.fontSizeCaption - 2)
-                    font.letterSpacing: 1
-                }
-                Text {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: gameViewModel.puzzleNumber
-                    color: Theme.primary
-                    font.bold: true
-                    font.pixelSize: Theme.fontSizeCaption
+                    font.pixelSize: Theme.fontSizeBody - 1
+                    horizontalAlignment: Text.AlignHCenter
                 }
             }
         }
 
-        Rectangle {
+        Item { Layout.fillWidth: true; Layout.minimumWidth: Theme.spacing }
+
+        CyberBillboard {
             id: rightTeamBox
-            Layout.fillWidth: true
+            Layout.preferredWidth: root.teamPanelWidth
+            Layout.maximumWidth: root.teamPanelWidth
             Layout.fillHeight: true
             readonly property bool active: gameViewModel.activeTeam === "Team_B"
-            radius: Theme.radius * 0.75
-            color: active
-                   ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.3)
-                   : "transparent"
-            border.width: active ? Theme.borderWidth * 2 : Theme.borderWidth
-            border.color: active
-                          ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.75)
-                          : Qt.rgba(Theme.secondary.r, Theme.secondary.g, Theme.secondary.b, 0.35)
-            clip: true
-
-            CometBorder {
-                anchors.fill: parent
-                anchors.margins: Theme.borderWidth
-                running: rightTeamBox.active
-            }
+            cornerRadius: Theme.radius
+            glowColor: active ? Theme.primary : Theme.secondary
+            panelColor: active
+                        ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.22)
+                        : Qt.rgba(Theme.surfaceAlt.r, Theme.surfaceAlt.g, Theme.surfaceAlt.b, 0.35)
+            panelOpacity: 1
+            showComet: active
+            cometRunning: active
+            billboardGlow: active
 
             RowLayout {
                 anchors.fill: parent
-                anchors.margins: Theme.spacing * 0.35
-                spacing: Theme.spacing * 0.35
+                anchors.leftMargin: root.teamPadH
+                anchors.rightMargin: root.teamPadH
+                anchors.topMargin: root.teamPadV
+                anchors.bottomMargin: root.teamPadV
+                spacing: Theme.spacing * 0.5
                 layoutDirection: Qt.RightToLeft
 
                 Text {
                     Layout.fillWidth: true
+                    Layout.minimumWidth: Theme.spacing * 3
                     text: gameViewModel.teamBName
-                    color: rightTeamBox.active ? Qt.lighter(Theme.primary, 1.35) : Theme.textSecondary
+                    color: rightTeamBox.active ? Qt.lighter(Theme.primary, 1.35) : Theme.textPrimary
                     font.bold: rightTeamBox.active
-                    font.pixelSize: Theme.fontSizeCaption
+                    font.pixelSize: Theme.fontSizeBody
                     horizontalAlignment: Text.AlignRight
                     elide: Text.ElideLeft
                     maximumLineCount: 1
@@ -156,7 +179,7 @@ Item {
                 }
                 Text {
                     text: gameViewModel.label("ui.score.round_points_format").arg(gameViewModel.totalScoreTeamB)
-                    color: Theme.textSecondary
+                    color: Theme.textPrimary
                     font.pixelSize: Theme.fontSizeCaption
                 }
             }

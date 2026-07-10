@@ -23,6 +23,7 @@ class AdminViewModel : public QObject
     Q_PROPERTY(int selectedPresetId READ selectedPresetId WRITE setSelectedPresetId NOTIFY selectedPresetIdChanged)
     Q_PROPERTY(int selectedRoundId READ selectedRoundId WRITE setSelectedRoundId NOTIFY selectedRoundIdChanged)
     Q_PROPERTY(int selectedPuzzleId READ selectedPuzzleId NOTIFY selectedPuzzleIdChanged)
+    Q_PROPERTY(int editorLoadRevision READ editorLoadRevision NOTIFY editorLoadRevisionChanged)
 
     Q_PROPERTY(QString selectedPresetName READ selectedPresetName NOTIFY selectedPresetIdChanged)
     Q_PROPERTY(QString editPresetName READ editPresetName WRITE setEditPresetName NOTIFY editPresetNameChanged)
@@ -45,6 +46,8 @@ class AdminViewModel : public QObject
     Q_PROPERTY(bool isPhotoMaskRound READ isPhotoMaskRound NOTIFY selectedRoundIdChanged)
     Q_PROPERTY(bool imageProcessing READ imageProcessing NOTIFY imageProcessingChanged)
     Q_PROPERTY(bool maskProcessing READ maskProcessing NOTIFY maskProcessingChanged)
+    Q_PROPERTY(int maskPrecision READ maskPrecision WRITE setMaskPrecision NOTIFY maskPrecisionChanged)
+    Q_PROPERTY(QString maskPrecisionLabel READ maskPrecisionLabel NOTIFY maskPrecisionChanged)
 
     Q_PROPERTY(bool roundConfigOpen READ roundConfigOpen NOTIFY roundConfigOpenChanged)
     Q_PROPERTY(QString configRoundTitle READ configRoundTitle NOTIFY roundConfigOpenChanged)
@@ -54,6 +57,7 @@ class AdminViewModel : public QObject
     Q_PROPERTY(int configImageSlotCount READ configImageSlotCount NOTIFY roundConfigOpenChanged)
     Q_PROPERTY(int configTextSlotCount READ configTextSlotCount NOTIFY roundConfigOpenChanged)
     Q_PROPERTY(int answerOptionCount READ answerOptionCount NOTIFY answerOptionsChanged)
+    Q_PROPERTY(int answerOptionsRevision READ answerOptionsRevision NOTIFY answerOptionsChanged)
     Q_PROPERTY(int maxAnswerOptions READ maxAnswerOptions CONSTANT)
     Q_PROPERTY(QString hybridAnimationStyle READ hybridAnimationStyle WRITE setHybridAnimationStyle NOTIFY hybridAnimationStyleChanged)
     Q_PROPERTY(bool puzzleSaving READ puzzleSaving NOTIFY puzzleSavingChanged)
@@ -79,6 +83,7 @@ public:
     int selectedPresetId() const { return m_selectedPresetId; }
     int selectedRoundId() const { return m_selectedRoundId; }
     int selectedPuzzleId() const { return m_selectedPuzzleId; }
+    int editorLoadRevision() const { return m_editorLoadRevision; }
 
     QString selectedPresetName() const;
     QString editPresetName() const { return m_editPresetName; }
@@ -101,6 +106,8 @@ public:
     bool isPhotoMaskRound() const { return m_selectedRoundLayoutType == QStringLiteral("FULL_MASK"); }
     bool imageProcessing() const { return m_imageProcessing; }
     bool maskProcessing() const { return m_maskProcessing; }
+    int maskPrecision() const { return m_maskPrecision; }
+    QString maskPrecisionLabel() const;
 
     bool roundConfigOpen() const { return m_roundConfigOpen; }
     QString configRoundTitle() const { return m_configRoundTitle; }
@@ -110,6 +117,7 @@ public:
     int configImageSlotCount() const;
     int configTextSlotCount() const;
     int answerOptionCount() const { return m_answerOptions.size(); }
+    int answerOptionsRevision() const { return m_answerOptionsRevision; }
     int maxAnswerOptions() const { return 10; }
     QString hybridAnimationStyle() const { return m_hybridAnimationStyle; }
     bool puzzleSaving() const { return m_pendingPuzzleSaves > 0; }
@@ -122,6 +130,7 @@ public:
     void setEditQuotes(const QString &quotes);
     void setHybridAnimationStyle(const QString &style);
     void setSelectedImageSlot(int slot);
+    void setMaskPrecision(int precision);
 
     Q_INVOKABLE void refreshPresets();
     Q_INVOKABLE void refreshCatalogRounds();
@@ -180,6 +189,7 @@ signals:
     void selectedPresetIdChanged(int presetId);
     void selectedRoundIdChanged(int roundId);
     void selectedPuzzleIdChanged();
+    void editorLoadRevisionChanged();
     void editPresetNameChanged();
     void editAnswerChanged();
     void editHintChanged();
@@ -194,6 +204,7 @@ signals:
     void selectedImageSlotChanged();
     void imageProcessingChanged();
     void maskProcessingChanged();
+    void maskPrecisionChanged();
     void roundConfigOpenChanged();
     void answerOptionsChanged();
     void cardTextsChanged();
@@ -227,6 +238,8 @@ private:
     void rebuildPresetRoundIds();
     void rebuildPuzzleList();
     void loadPuzzleEditor(int puzzleId);
+    void cancelPendingEditorJobs();
+    void clearTransientEditorState();
     void loadImageSlot(int slotIndex);
     void preloadPuzzleSlotImages(int puzzleId);
     bool validatePuzzleEditor();
@@ -255,10 +268,12 @@ private:
     int evaluateRoundTemplateStatus(int roundId) const;
 
     void regenerateGroupedAnswerOptions();
+    void bumpAnswerOptionsRevision();
     void loadEditorMasks(int puzzleId);
     QVector<PuzzleMaskInfo> editorMasksForSave() const;
     static QString normalizeAnswerKey(const QString &answer);
     static QString formatGroupedAnswerLabel(const QString &answer, const QList<int> &maskNumbers);
+    QString puzzleEditorHint(const PuzzleInfo &puzzle) const;
 
     DatabaseManager *m_database = nullptr;
     ImageProcessor *m_imageProcessor = nullptr;
@@ -272,6 +287,7 @@ private:
     int m_selectedPresetId = 0;
     int m_selectedRoundId = 0;
     int m_selectedPuzzleId = 0;
+    int m_editorLoadRevision = 0;
     int m_selectedTemplateId = 0;
     int m_selectedImageSlot = 0;
     int m_previewRevision = 0;
@@ -282,6 +298,7 @@ private:
     int m_processingJobs = 0;
     bool m_imageProcessing = false;
     bool m_maskProcessing = false;
+    int m_maskPrecision = 4;
 
     QString m_editPresetName;
     QString m_editAnswer;
@@ -295,6 +312,7 @@ private:
     QString m_configRoundRule;
     QStringList m_configCardTexts;
     QStringList m_answerOptions;
+    int m_answerOptionsRevision = 0;
     QString m_hybridAnimationStyle = QStringLiteral("soft");
     QImage m_sourceImage;
     QImage m_previewImage;

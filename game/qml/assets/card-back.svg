@@ -1,15 +1,43 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 154">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 312 200">
   <defs>
     <linearGradient id="cardBg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#252D38"/>
-      <stop offset="100%" stop-color="#1A2230"/>
+      <stop offset="0%" stop-color="#1E2733"/>
+      <stop offset="55%" stop-color="#141B24"/>
+      <stop offset="100%" stop-color="#0D1218"/>
     </linearGradient>
+    <linearGradient id="neonEdge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8DFCF6"/>
+      <stop offset="100%" stop-color="#45A29E"/>
+    </linearGradient>
+    <filter id="billboardGlow" x="-8%" y="-12%" width="116%" height="124%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <pattern id="scanlines" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="1" fill="#66FCF1" opacity="0.04"/>
+    </pattern>
+    <clipPath id="cardClip">
+      <rect x="0" y="0" width="312" height="200" rx="16"/>
+    </clipPath>
   </defs>
-  <rect x="2" y="2" width="116" height="150" rx="12" fill="url(#cardBg)" stroke="#45A29E" stroke-width="2.5"/>
-  <rect x="14" y="14" width="92" height="126" rx="8" fill="none" stroke="#45A29E" stroke-width="1" opacity="0.35"/>
-  <circle cx="60" cy="72" r="28" fill="none" stroke="#66FCF1" stroke-width="2" opacity="0.45"/>
-  <text x="60" y="84" text-anchor="middle" font-size="42" font-weight="700" fill="#66FCF1" font-family="Segoe UI, Arial, sans-serif">?</text>
-  <line x1="28" y1="128" x2="92" y2="128" stroke="#45A29E" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
-  <line x1="36" y1="136" x2="84" y2="136" stroke="#45A29E" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
-  <line x1="44" y1="144" x2="76" y2="144" stroke="#45A29E" stroke-width="2" stroke-linecap="round" opacity="0.25"/>
+
+  <g clip-path="url(#cardClip)">
+    <rect x="0" y="0" width="312" height="200" rx="16" fill="url(#cardBg)"/>
+    <rect x="0" y="0" width="312" height="200" rx="16" fill="url(#scanlines)"/>
+
+    <rect x="4" y="4" width="304" height="192" rx="13" fill="none" stroke="url(#neonEdge)" stroke-width="3" filter="url(#billboardGlow)"/>
+    <rect x="14" y="14" width="284" height="172" rx="10" fill="none" stroke="#66FCF1" stroke-width="1.2" opacity="0.28"/>
+
+    <circle cx="156" cy="100" r="42" fill="none" stroke="#66FCF1" stroke-width="2.5" opacity="0.42" filter="url(#billboardGlow)"/>
+    <circle cx="156" cy="100" r="30" fill="#0B0C10" opacity="0.55"/>
+
+    <text x="156" y="119" text-anchor="middle" font-size="58" font-weight="700" fill="#B8FFFA" font-family="Segoe UI, Arial, sans-serif" filter="url(#billboardGlow)">?</text>
+
+    <line x1="88" y1="164" x2="224" y2="164" stroke="#45A29E" stroke-width="2.5" stroke-linecap="round" opacity="0.45"/>
+    <line x1="104" y1="176" x2="208" y2="176" stroke="#45A29E" stroke-width="2" stroke-linecap="round" opacity="0.32"/>
+    <line x1="120" y1="186" x2="192" y2="186" stroke="#45A29E" stroke-width="1.5" stroke-linecap="round" opacity="0.22"/>
+  </g>
 </svg>

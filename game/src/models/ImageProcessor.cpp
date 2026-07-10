@@ -17,6 +17,56 @@ namespace {
 #ifdef HAS_OPENCV
 constexpr int kMaxWorkEdge = 1024;
 
+struct MaskPrecisionProfile {
+    int borderDivisor = 6;
+    int coreDivisor = 4;
+    int grabCutIterations = 10;
+    int refineGrabCutIterations = 4;
+    int colorPeelPasses = 4;
+    int colorPeelThreshold = 20;
+    double shrinkScale = 0.02;
+    int openKernel = 5;
+    int erosionPasses = 1;
+    double maskOverlapMin = 0.5;
+    double insideSelectionMin = 0.4;
+    bool secondGrabCut = true;
+    bool looseCapture = false;
+};
+
+MaskPrecisionProfile maskPrecisionProfile(int level)
+{
+    level = std::clamp(level, 1, 10);
+    const double t = (level - 1) / 9.0;
+
+    const MaskPrecisionProfile loose = {
+        14, 8, 4, 0, 0, 38, 0.0, 3, 0, 0.24, 0.14, false};
+    const MaskPrecisionProfile tight = {
+        4, 3, 12, 6, 7, 10, 0.05, 5, 2, 0.72, 0.62, true};
+
+    const auto lerpInt = [](int a, int b, double ratio) {
+        return static_cast<int>(std::lround(a + (b - a) * ratio));
+    };
+    const auto lerpD = [](double a, double b, double ratio) {
+        return a + (b - a) * ratio;
+    };
+
+    MaskPrecisionProfile profile;
+    profile.borderDivisor = std::max(3, lerpInt(loose.borderDivisor, tight.borderDivisor, t));
+    profile.coreDivisor = std::max(3, lerpInt(loose.coreDivisor, tight.coreDivisor, t));
+    profile.grabCutIterations = std::max(3, lerpInt(loose.grabCutIterations, tight.grabCutIterations, t));
+    profile.refineGrabCutIterations = level >= 6 ? std::max(1, lerpInt(2, tight.refineGrabCutIterations, (t - 0.55) / 0.45)) : 0;
+    profile.colorPeelPasses = level >= 5 ? std::max(0, lerpInt(1, tight.colorPeelPasses, (t - 0.44) / 0.56)) : 0;
+    profile.colorPeelThreshold = lerpInt(loose.colorPeelThreshold, tight.colorPeelThreshold, t);
+    profile.shrinkScale = lerpD(loose.shrinkScale, tight.shrinkScale, t);
+    profile.openKernel = std::clamp(lerpInt(loose.openKernel, tight.openKernel, t), 3, 7);
+    profile.erosionPasses = level >= 7 ? std::max(0, lerpInt(0, tight.erosionPasses, (t - 0.66) / 0.34)) : 0;
+    profile.maskOverlapMin = lerpD(loose.maskOverlapMin, tight.maskOverlapMin, t);
+    profile.insideSelectionMin = lerpD(loose.insideSelectionMin, tight.insideSelectionMin, t);
+    profile.secondGrabCut = level >= 6;
+    profile.looseCapture = level <= 3;
+    return profile;
+}
+
 QImage downscaleWorkImage(const QImage &image)
 {
     const int maxDim = std::max(image.width(), image.height());
@@ -157,7 +207,7 @@ QString contourStringFromPolygon(const std::vector<cv::Point> &polygon, int cols
     }
 
     std::vector<cv::Point> simplified;
-    cv::approxPolyDP(polygon, simplified, 2.0, true);
+    cv::approxPolyDP(polygon, simplified, 1.5, true);
     if (simplified.size() < 3) {
         simplified = polygon;
     }
@@ -165,10 +215,186 @@ QString contourStringFromPolygon(const std::vector<cv::Point> &polygon, int cols
     return contourPointsFromPolygon(simplified, cols, rows);
 }
 
+cv::Mat maskForSelection(const cv::Rect &selection, int imgW, int imgH)
+{
+    cv::Mat mask = cv::Mat::zeros(imgH, imgW, CV_8UC1);
+    cv::rectangle(mask, selection, cv::Scalar(255), cv::FILLED);
+    return mask;
+}
+
+double contourOverlapWithMask(const std::vector<cv::Point> &contour, const cv::Mat &mask)
+{
+    cv::Mat contourMask = cv::Mat::zeros(mask.rows, mask.cols, CV_8UC1);
+    const std::vector<std::vector<cv::Point>> contours{contour};
+    cv::fillPoly(contourMask, contours, cv::Scalar(255));
+
+    cv::Mat overlap;
+    cv::bitwise_and(contourMask, mask, overlap);
+    const int overlapArea = cv::countNonZero(overlap);
+    const int contourArea = std::max(1, cv::countNonZero(contourMask));
+    return static_cast<double>(overlapArea) / contourArea;
+}
+
+cv::Mat shrinkMaskByDistance(const cv::Mat &mask, double minDistance)
+{
+    if (mask.empty() || minDistance <= 0.0) {
+        return mask;
+    }
+
+    cv::Mat dist;
+    cv::distanceTransform(mask, dist, cv::DIST_L2, 5);
+    cv::Mat shrunk;
+    cv::threshold(dist, shrunk, minDistance, 255.0, cv::THRESH_BINARY);
+    shrunk.convertTo(shrunk, CV_8UC1);
+    return shrunk;
+}
+
+cv::Mat peelColorMatchedEdges(const cv::Mat &lab, const cv::Mat &mask, int passes, int colorThreshold)
+{
+    if (lab.empty() || mask.empty() || passes <= 0) {
+        return mask;
+    }
+
+    cv::Mat current = mask;
+    for (int pass = 0; pass < passes; ++pass) {
+        cv::Mat next = current.clone();
+        bool changed = false;
+        for (int y = 1; y < current.rows - 1; ++y) {
+            for (int x = 1; x < current.cols - 1; ++x) {
+                if (current.at<uchar>(y, x) == 0) {
+                    continue;
+                }
+
+                int exteriorNeighbors = 0;
+                double exteriorDistance = 0.0;
+                int interiorNeighbors = 0;
+                double interiorDistance = 0.0;
+                const cv::Vec3b center = lab.at<cv::Vec3b>(y, x);
+
+                for (int dy = -1; dy <= 1; ++dy) {
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        if (dx == 0 && dy == 0) {
+                            continue;
+                        }
+                        const int nx = x + dx;
+                        const int ny = y + dy;
+                        const cv::Vec3b neighbor = lab.at<cv::Vec3b>(ny, nx);
+                        const double dist = std::abs(center[0] - neighbor[0])
+                                            + std::abs(center[1] - neighbor[1])
+                                            + std::abs(center[2] - neighbor[2]);
+                        if (current.at<uchar>(ny, nx) == 0) {
+                            ++exteriorNeighbors;
+                            exteriorDistance += dist;
+                        } else {
+                            ++interiorNeighbors;
+                            interiorDistance += dist;
+                        }
+                    }
+                }
+
+                if (exteriorNeighbors == 0) {
+                    continue;
+                }
+
+                const double avgExterior = exteriorDistance / exteriorNeighbors;
+                const double avgInterior = interiorNeighbors > 0
+                                               ? interiorDistance / interiorNeighbors
+                                               : 1e9;
+                if (avgExterior < colorThreshold && avgExterior + 5.0 < avgInterior) {
+                    next.at<uchar>(y, x) = 0;
+                    changed = true;
+                }
+            }
+        }
+        current = next;
+        if (!changed) {
+            break;
+        }
+    }
+    return current;
+}
+
+cv::Mat refineForegroundMask(const cv::Mat &fgMask,
+                             const cv::Rect &selection,
+                             const MaskPrecisionProfile &profile,
+                             const cv::Mat &lab = cv::Mat())
+{
+    if (fgMask.empty() || selection.empty()) {
+        return fgMask;
+    }
+
+    cv::Point center(selection.x + selection.width / 2,
+                     selection.y + selection.height / 2);
+    center.x = std::clamp(center.x, 0, fgMask.cols - 1);
+    center.y = std::clamp(center.y, 0, fgMask.rows - 1);
+
+    cv::Mat labels;
+    cv::Mat stats;
+    cv::Mat centroids;
+    const int componentCount = cv::connectedComponentsWithStats(fgMask, labels, stats, centroids, 8, CV_32S);
+
+    int keepLabel = labels.at<int>(center.y, center.x);
+    if (keepLabel <= 0) {
+        double bestOverlap = 0.0;
+        const cv::Mat selectionMask = maskForSelection(selection, fgMask.cols, fgMask.rows);
+        for (int label = 1; label < componentCount; ++label) {
+            cv::Mat componentMask = (labels == label);
+            componentMask.convertTo(componentMask, CV_8UC1, 255);
+            cv::Mat overlap;
+            cv::bitwise_and(componentMask, selectionMask, overlap);
+            const double overlapRatio = static_cast<double>(cv::countNonZero(overlap))
+                                        / std::max(1, cv::countNonZero(componentMask));
+            if (overlapRatio > bestOverlap) {
+                bestOverlap = overlapRatio;
+                keepLabel = label;
+            }
+        }
+    }
+
+    if (keepLabel <= 0) {
+        return fgMask;
+    }
+
+    cv::Mat refined = cv::Mat::zeros(fgMask.size(), CV_8UC1);
+    refined.setTo(255, labels == keepLabel);
+
+    const cv::Mat kernelSmall = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
+    if (!profile.looseCapture) {
+        const int openSize = std::clamp(profile.openKernel, 3, 7);
+        const cv::Mat kernelOpen = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(openSize, openSize));
+        if (openSize > 0) {
+            cv::morphologyEx(refined, refined, cv::MORPH_OPEN, kernelOpen);
+        }
+
+        if (!lab.empty() && profile.colorPeelPasses > 0) {
+            refined = peelColorMatchedEdges(lab, refined, profile.colorPeelPasses, profile.colorPeelThreshold);
+        }
+
+        const double minDist = std::clamp(std::min(selection.width, selection.height) * profile.shrinkScale,
+                                          0.0,
+                                          8.0);
+        if (minDist > 0.0) {
+            refined = shrinkMaskByDistance(refined, minDist);
+        }
+
+        cv::morphologyEx(refined, refined, cv::MORPH_OPEN, kernelSmall);
+        if (profile.erosionPasses > 0) {
+            cv::erode(refined, refined, kernelSmall, cv::Point(-1, -1), profile.erosionPasses);
+        }
+    }
+
+    if (refined.at<uchar>(center.y, center.x) == 0) {
+        cv::dilate(refined, refined, kernelSmall);
+    }
+
+    return refined;
+}
+
 bool pickBestForegroundContour(const std::vector<std::vector<cv::Point>> &contours,
                                const cv::Rect &selection,
                                int imgW,
                                int imgH,
+                               const MaskPrecisionProfile &profile,
                                std::vector<cv::Point> *bestContour)
 {
     if (!bestContour) {
@@ -179,6 +405,7 @@ bool pickBestForegroundContour(const std::vector<std::vector<cv::Point>> &contou
                                     selection.y + selection.height / 2);
     const double imgArea = static_cast<double>(imgW * imgH);
     const double selectionArea = static_cast<double>(std::max(1, selection.area()));
+    const cv::Mat selectionMask = maskForSelection(selection, imgW, imgH);
 
     double bestScore = -1e9;
     bool found = false;
@@ -205,14 +432,20 @@ bool pickBestForegroundContour(const std::vector<std::vector<cv::Point>> &contou
 
         const double insideSelection = static_cast<double>(inter.area())
                                        / std::max(1.0, static_cast<double>(box.area()));
+        const double maskOverlap = contourOverlapWithMask(contour, selectionMask);
         const double selectionFill = area / selectionArea;
+        const double spillOutside = std::max(0.0, 1.0 - maskOverlap);
         const bool touchesBorder = contourTouchesImageBorder(box, imgW, imgH);
         if (touchesBorder && area > imgArea * 0.25) {
             continue;
         }
+        if (maskOverlap < profile.maskOverlapMin || insideSelection < profile.insideSelectionMin) {
+            continue;
+        }
 
-        const double score = insideSelection * 0.55 + selectionFill * 0.35
-                             - (area / imgArea) * 0.45 - (touchesBorder ? 0.12 : 0.0);
+        const double score = maskOverlap * 0.5 + insideSelection * 0.32 + selectionFill * 0.18
+                             - spillOutside * 0.65 - (area / imgArea) * 0.35
+                             - (touchesBorder ? 0.12 : 0.0);
         if (score > bestScore) {
             bestScore = score;
             *bestContour = contour;
@@ -223,7 +456,9 @@ bool pickBestForegroundContour(const std::vector<std::vector<cv::Point>> &contou
     return found;
 }
 
-QString extractContourWithGrabCut(const cv::Mat &bgr, const cv::Rect &selection)
+QString extractContourWithGrabCut(const cv::Mat &bgr,
+                                  const cv::Rect &selection,
+                                  const MaskPrecisionProfile &profile)
 {
     const int imgW = bgr.cols;
     const int imgH = bgr.rows;
@@ -232,27 +467,69 @@ QString extractContourWithGrabCut(const cv::Mat &bgr, const cv::Rect &selection)
         return {};
     }
 
+    cv::Mat lab;
+    cv::cvtColor(bgr, lab, cv::COLOR_BGR2Lab);
+
     cv::Mat gcMask(imgH, imgW, CV_8UC1, cv::Scalar(cv::GC_BGD));
     cv::Mat bgdModel;
     cv::Mat fgdModel;
-    cv::grabCut(bgr, gcMask, grabRect, bgdModel, fgdModel, 5, cv::GC_INIT_WITH_RECT);
+
+    if (profile.looseCapture) {
+        cv::grabCut(bgr, gcMask, grabRect, bgdModel, fgdModel, profile.grabCutIterations, cv::GC_INIT_WITH_RECT);
+    } else {
+        cv::rectangle(gcMask, grabRect, cv::Scalar(cv::GC_PR_FGD), cv::FILLED);
+
+        const int borderX = std::max(3, grabRect.width / profile.borderDivisor);
+        const int borderY = std::max(3, grabRect.height / profile.borderDivisor);
+        cv::Rect inner(grabRect.x + borderX,
+                       grabRect.y + borderY,
+                       grabRect.width - borderX * 2,
+                       grabRect.height - borderY * 2);
+        if (inner.width > 6 && inner.height > 6) {
+            cv::Mat borderBand = cv::Mat::zeros(imgH, imgW, CV_8UC1);
+            cv::rectangle(borderBand, grabRect, cv::Scalar(255), cv::FILLED);
+            cv::rectangle(borderBand, inner, cv::Scalar(0), cv::FILLED);
+            gcMask.setTo(cv::GC_BGD, borderBand);
+
+            const int coreW = std::max(4, inner.width / profile.coreDivisor);
+            const int coreH = std::max(4, inner.height / profile.coreDivisor);
+            const cv::Rect core(inner.x + (inner.width - coreW) / 2,
+                                inner.y + (inner.height - coreH) / 2,
+                                coreW,
+                                coreH);
+            cv::rectangle(gcMask, core, cv::Scalar(cv::GC_FGD), cv::FILLED);
+        }
+
+        cv::grabCut(bgr, gcMask, grabRect, bgdModel, fgdModel, profile.grabCutIterations, cv::GC_INIT_WITH_MASK);
+    }
 
     cv::Mat fgMask = (gcMask == cv::GC_FGD) | (gcMask == cv::GC_PR_FGD);
     fgMask.convertTo(fgMask, CV_8UC1, 255);
 
-    cv::Mat selectionMask = cv::Mat::zeros(imgH, imgW, CV_8UC1);
-    cv::rectangle(selectionMask, selection, cv::Scalar(255), cv::FILLED);
+    const cv::Mat selectionMask = maskForSelection(selection, imgW, imgH);
     cv::bitwise_and(fgMask, selectionMask, fgMask);
+    fgMask = refineForegroundMask(fgMask, selection, profile, lab);
 
-    const cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
-    cv::morphologyEx(fgMask, fgMask, cv::MORPH_CLOSE, kernel);
-    cv::morphologyEx(fgMask, fgMask, cv::MORPH_OPEN, kernel);
+    if (profile.secondGrabCut && profile.refineGrabCutIterations > 0) {
+        const cv::Mat kernelSmall = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
+        cv::Mat gcRefined(imgH, imgW, CV_8UC1, cv::Scalar(cv::GC_BGD));
+        gcRefined.setTo(cv::GC_PR_FGD, fgMask > 0);
+        cv::Mat definiteFg;
+        cv::erode(fgMask, definiteFg, kernelSmall, cv::Point(-1, -1), 2);
+        gcRefined.setTo(cv::GC_FGD, definiteFg > 0);
+        cv::grabCut(bgr, gcRefined, grabRect, bgdModel, fgdModel, profile.refineGrabCutIterations, cv::GC_EVAL);
+
+        fgMask = (gcRefined == cv::GC_FGD) | (gcRefined == cv::GC_PR_FGD);
+        fgMask.convertTo(fgMask, CV_8UC1, 255);
+        cv::bitwise_and(fgMask, selectionMask, fgMask);
+        fgMask = refineForegroundMask(fgMask, selection, profile, lab);
+    }
 
     std::vector<std::vector<cv::Point>> contours;
     cv::findContours(fgMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
     std::vector<cv::Point> bestContour;
-    if (!pickBestForegroundContour(contours, selection, imgW, imgH, &bestContour)) {
+    if (!pickBestForegroundContour(contours, selection, imgW, imgH, profile, &bestContour)) {
         return {};
     }
 
@@ -373,7 +650,11 @@ ImageProcessor::ImageProcessor(QObject *parent)
 {
 }
 
-QString ImageProcessor::extractContour(const QImage &image, double relX, double relY, int tolerance)
+QString ImageProcessor::extractContour(const QImage &image,
+                                       double relX,
+                                       double relY,
+                                       int tolerance,
+                                       int precision)
 {
     if (image.isNull()) {
         emit processingFailed(QStringLiteral("Image is empty"));
@@ -384,9 +665,12 @@ QString ImageProcessor::extractContour(const QImage &image, double relX, double 
     Q_UNUSED(relX)
     Q_UNUSED(relY)
     Q_UNUSED(tolerance)
+    Q_UNUSED(precision)
     emit processingFailed(QStringLiteral("OpenCV is not available"));
     return {};
 #else
+    const MaskPrecisionProfile profile = maskPrecisionProfile(precision);
+    const double toleranceScale = 1.0 + (5.5 - std::clamp(precision, 1, 10)) * 0.14;
     const QImage workImage = downscaleWorkImage(image);
     cv::Mat mat = qImageToMat(workImage);
     cv::Mat bgr;
@@ -409,15 +693,17 @@ QString ImageProcessor::extractContour(const QImage &image, double relX, double 
     cv::Scalar mean;
     cv::Scalar stddev;
     cv::meanStdDev(patch, mean, stddev);
-    const int tolL = std::clamp(static_cast<int>(stddev[0] * 2.8) + 8, 12, 48);
-    const int tolAB = std::clamp(static_cast<int>(std::max(stddev[1], stddev[2]) * 2.2) + 6, 10, 36);
+    const int tolL = std::clamp(static_cast<int>((stddev[0] * 2.4 + 6) * toleranceScale), 8, 48);
+    const int tolAB = std::clamp(static_cast<int>((std::max(stddev[1], stddev[2]) * 1.9 + 5) * toleranceScale), 6, 36);
     const cv::Scalar loDiff(tolL, tolAB, tolAB);
     const cv::Scalar upDiff(tolL, tolAB, tolAB);
 
     cv::Mat bestMask;
     int bestArea = 0;
 
-    const int tolerances[] = {0, 6, 12};
+    const int tolerances[] = {0,
+                              static_cast<int>(4 * toleranceScale),
+                              static_cast<int>(8 * toleranceScale)};
     for (int attempt = 0; attempt < 3; ++attempt) {
         const int extra = tolerances[attempt];
         cv::Mat floodMask = cv::Mat::zeros(bgr.rows + 2, bgr.cols + 2, CV_8UC1);
@@ -434,9 +720,14 @@ QString ImageProcessor::extractContour(const QImage &image, double relX, double 
                       4 | cv::FLOODFILL_MASK_ONLY | (255 << 8));
 
         cv::Mat regionMask = floodMask(cv::Rect(1, 1, bgr.cols, bgr.rows));
-        const cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5));
-        cv::morphologyEx(regionMask, regionMask, cv::MORPH_CLOSE, kernel);
+        const cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
         cv::morphologyEx(regionMask, regionMask, cv::MORPH_OPEN, kernel);
+
+        const cv::Rect seedBox(std::max(0, pixelX - patchRadius),
+                               std::max(0, pixelY - patchRadius),
+                               std::min(bgr.cols, patchRadius * 2 + 1),
+                               std::min(bgr.rows, patchRadius * 2 + 1));
+        regionMask = refineForegroundMask(regionMask, seedBox, profile, lab);
 
         std::vector<std::vector<cv::Point>> contours;
         cv::findContours(regionMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
@@ -495,7 +786,7 @@ QString ImageProcessor::extractContour(const QImage &image, double relX, double 
     }
 
     std::vector<cv::Point> simplified;
-    cv::approxPolyDP(finalContours[bestIdx], simplified, 2.0, true);
+    cv::approxPolyDP(finalContours[bestIdx], simplified, 1.5, true);
     if (simplified.size() < 3) {
         simplified = finalContours[bestIdx];
     }
@@ -515,7 +806,8 @@ QString ImageProcessor::extractContourInRect(const QImage &image,
                                              double relX,
                                              double relY,
                                              double relW,
-                                             double relH)
+                                             double relH,
+                                             int precision)
 {
     if (image.isNull()) {
         emit processingFailed(QStringLiteral("Image is empty"));
@@ -527,9 +819,11 @@ QString ImageProcessor::extractContourInRect(const QImage &image,
     Q_UNUSED(relY)
     Q_UNUSED(relW)
     Q_UNUSED(relH)
+    Q_UNUSED(precision)
     emit processingFailed(QStringLiteral("OpenCV is not available"));
     return {};
 #else
+    const MaskPrecisionProfile profile = maskPrecisionProfile(precision);
     const QImage workImage = downscaleWorkImage(image);
     cv::Mat mat = qImageToMat(workImage);
     cv::Mat bgr;
@@ -541,13 +835,13 @@ QString ImageProcessor::extractContourInRect(const QImage &image,
 
     QString contour;
     if (selection.width >= 4 && selection.height >= 4) {
-        contour = extractContourWithGrabCut(bgr, selection);
+        contour = extractContourWithGrabCut(bgr, selection, profile);
     }
 
     if (contour.isEmpty()) {
         const double cx = relX + relW * 0.5;
         const double cy = relY + relH * 0.5;
-        contour = extractContour(image, cx, cy, 24);
+        contour = extractContour(image, cx, cy, 24, precision);
     }
 
     if (contour.isEmpty()) {

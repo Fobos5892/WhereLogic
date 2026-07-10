@@ -14,6 +14,7 @@
         <file>qml/views/FinalVictoryScreen.qml</file>
         <file>qml/components/FullscreenToggle.qml</file>
         <file>qml/components/GameSlider.qml</file>
+        <file>qml/components/MaskPrecisionSlider.qml</file>
         <file>qml/components/GameButton.qml</file>
         <file>qml/components/GameTextField.qml</file>
         <file>qml/components/SettingsTextField.qml</file>
@@ -21,6 +22,7 @@
         <file>qml/components/EditorAutoSaveScope.qml</file>
         <file>qml/components/GameComboBox.qml</file>
         <file>qml/components/NeonPanel.qml</file>
+        <file>qml/components/CyberBillboard.qml</file>
         <file>qml/components/StarRow.qml</file>
         <file>qml/components/GameCard.qml</file>
         <file>qml/components/SmartTimer.qml</file>

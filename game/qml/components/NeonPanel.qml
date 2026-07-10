@@ -1,7 +1,8 @@
 import QtQuick
 import ".."
+import "."
 
-Rectangle {
+Item {
     id: panel
 
     property int pad: Math.round(Theme.spacing * 1.35)
@@ -9,25 +10,21 @@ Rectangle {
 
     default property alias children: content.data
 
-    color: Theme.surface
-    radius: Theme.radius
-    border.width: Theme.borderWidth
-    border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.72)
-    opacity: 0.98
-
-    Rectangle {
-        anchors.fill: parent
-        anchors.margins: Theme.borderWidth
-        radius: Math.max(1, Theme.radius - Theme.borderWidth)
-        color: "transparent"
-        border.width: 1
-        border.color: Qt.rgba(Theme.textSecondary.r, Theme.textSecondary.g, Theme.textSecondary.b, 0.15)
-    }
-
     implicitHeight: content.height + pad * 2
+
+    CyberBillboard {
+        anchors.fill: parent
+        z: 0
+        cornerRadius: Theme.radius
+        glowColor: Theme.primary
+        panelColor: Theme.surface
+        panelOpacity: 0.98
+        billboardGlow: true
+    }
 
     Item {
         id: content
+        z: 1
         x: pad
         y: pad
         width: panel.innerWidth

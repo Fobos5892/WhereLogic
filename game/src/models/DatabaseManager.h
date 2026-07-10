@@ -122,6 +122,7 @@ public:
     RoundInfo roundById(int roundId) const;
     PuzzleInfo puzzleById(int puzzleId) const;
     QString localizedString(const QString &key, const QString &langCode = QStringLiteral("ru")) const;
+    QString storedLocalizedString(const QString &key, const QString &langCode = QStringLiteral("ru")) const;
 
     bool saveTeams(const QVector<TeamInfo> &teams);
     bool clearTeams();
@@ -148,6 +149,7 @@ private:
     bool removeDuplicatePresets();
     bool syncUiDefaultsToDatabase();
     bool normalizePuzzleHintKeys();
+    bool scrubImportedDemoPuzzleHints();
     bool repairDuplicatePuzzles();
     int puzzleImageSlotCount(int puzzleId) const;
     int canonicalPuzzleIdUnlocked(int puzzleId) const;

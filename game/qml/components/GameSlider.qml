@@ -8,6 +8,7 @@ Item {
     property int from: 0
     property int to: 100
     property int value: 50
+    property bool showValueLabel: true
 
     implicitHeight: Theme.buttonHeight
 
@@ -116,6 +117,7 @@ Item {
         }
 
         Text {
+            visible: control.showValueLabel
             text: control.value + "%"
             color: Theme.primary
             font.pixelSize: Theme.fontSizeCaption

@@ -39,6 +39,7 @@ class GameViewModel : public QObject
     Q_PROPERTY(QString teamBName READ teamBName NOTIFY teamsChanged)
     Q_PROPERTY(int totalScoreTeamA READ totalScoreTeamA NOTIFY teamsChanged)
     Q_PROPERTY(int totalScoreTeamB READ totalScoreTeamB NOTIFY teamsChanged)
+    Q_PROPERTY(bool isGameTie READ isGameTie NOTIFY teamsChanged)
     Q_PROPERTY(bool isRemoteConnected READ isRemoteConnected NOTIFY remoteConnectedChanged)
     Q_PROPERTY(bool showLocalControls READ showLocalControls NOTIFY showLocalControlsChanged)
     Q_PROPERTY(bool cardsFaceUp READ cardsFaceUp NOTIFY cardsFaceUpChanged)
@@ -96,6 +97,7 @@ public:
     QString teamBName() const { return m_teamBName; }
     int totalScoreTeamA() const { return m_totalScoreTeamA; }
     int totalScoreTeamB() const { return m_totalScoreTeamB; }
+    bool isGameTie() const { return m_totalScoreTeamA == m_totalScoreTeamB; }
     bool isRemoteConnected() const { return m_remoteConnected; }
     bool showLocalControls() const { return m_showLocalControls; }
     bool cardsFaceUp() const { return m_cardsFaceUp; }
@@ -188,6 +190,7 @@ private:
     void loadPersistedState();
     void persistState();
     void reloadTeamsFromDatabase();
+    void resetAllStoredScores();
     int resolvePuzzleIndex(const QVector<PuzzleInfo> &puzzles, int savedPuzzleId) const;
     void setStage(const QString &stage);
     void setSubState(const QString &subState);
@@ -207,7 +210,7 @@ private:
     void enterResolution();
     void awardPointToActiveTeam();
     void settleRoundScores();
-    bool shouldEndRoundEarly() const;
+    bool shouldEndRoundEarlyAfterScoring(const QString &scoringTeam) const;
     bool tryCompleteRoundEarly();
     void proceedAfterScoring();
     void advancePuzzleOrRound();

@@ -33,7 +33,7 @@ QtObject {
     readonly property int buttonHeight: Math.round(h * 0.052)
     readonly property int margin: Math.round(w * 0.013)
     readonly property int spacing: Math.round(w * 0.009)
-    readonly property int radius: Math.round(w * 0.008)
+    readonly property int radius: Math.max(6, Math.round(w * 0.01))
     readonly property int borderWidth: Math.max(1, Math.round(w * 0.0015))
 
     readonly property int fontSizeHero: Math.round(h * 0.045)

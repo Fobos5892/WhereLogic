@@ -8,22 +8,47 @@ Item {
     property color cometColor: Qt.lighter(Theme.primary, 1.35)
     property int cometCount: 2
     property int trailLength: 6
+    property int cornerRadius: Theme.radius
 
     function pointOnBorder(t) {
+        const w = Math.max(1, root.width)
+        const h = Math.max(1, root.height)
+        const r = Math.min(cornerRadius, w * 0.5, h * 0.5)
         const norm = t - Math.floor(t)
-        const w = root.width
-        const h = root.height
-        const seg = norm * 4
-        const s = Math.min(3, Math.floor(seg))
-        const f = seg - s
 
-        if (s === 0)
-            return Qt.point(f * w, 0)
-        if (s === 1)
-            return Qt.point(w, f * h)
-        if (s === 2)
-            return Qt.point(w - f * w, h)
-        return Qt.point(0, h - f * h)
+        const topLen = Math.max(0, w - 2 * r)
+        const sideLen = Math.max(0, h - 2 * r)
+        const arcLen = Math.PI * r * 0.5
+        const perim = 2 * topLen + 2 * sideLen + 4 * arcLen
+        let d = norm * perim
+
+        function corner(cx, cy, startRad, dist) {
+            const a = startRad + (dist / arcLen) * (Math.PI / 2)
+            return Qt.point(cx + r * Math.cos(a), cy + r * Math.sin(a))
+        }
+
+        if (d <= topLen)
+            return Qt.point(r + d, 0)
+        d -= topLen
+        if (d <= arcLen)
+            return corner(w - r, r, -Math.PI / 2, d)
+        d -= arcLen
+        if (d <= sideLen)
+            return Qt.point(w, r + d)
+        d -= sideLen
+        if (d <= arcLen)
+            return corner(w - r, h - r, 0, d)
+        d -= arcLen
+        if (d <= topLen)
+            return Qt.point(w - r - d, h)
+        d -= topLen
+        if (d <= arcLen)
+            return corner(r, h - r, Math.PI / 2, d)
+        d -= arcLen
+        if (d <= sideLen)
+            return Qt.point(0, h - r - d)
+        d -= sideLen
+        return corner(r, r, Math.PI, d)
     }
 
     Repeater {

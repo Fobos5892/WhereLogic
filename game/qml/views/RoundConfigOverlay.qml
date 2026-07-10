@@ -19,6 +19,8 @@ Rectangle {
     property string hintOne: hintPart(0)
     property string hintTwo: hintPart(1)
     property string hintThree: hintPart(2)
+    readonly property int editorFieldReloadKey:
+        adminViewModel.editorLoadRevision * 1000000 + adminViewModel.selectedPuzzleId
 
     function hintPart(idx) {
         const parts = (adminViewModel.editHint || "").split("||")
@@ -74,6 +76,10 @@ Rectangle {
             root.syncHostHintFieldCount()
         }
         function onSelectedPuzzleIdChanged() {
+            root.hostHintFieldCount = 0
+            root.hintOne = ""
+            root.hintTwo = ""
+            root.hintThree = ""
             root.hintOne = root.hintPart(0)
             root.hintTwo = root.hintPart(1)
             root.hintThree = root.hintPart(2)
@@ -86,6 +92,16 @@ Rectangle {
             root.syncHostHintFieldCount()
             root.useAnswerOptionsMode = !adminViewModel.isPhotoMaskRound
                                         && adminViewModel.answerOptionCount > 0
+        }
+        function onEditorLoadRevisionChanged() {
+            root.hostHintFieldCount = 0
+            root.hintOne = ""
+            root.hintTwo = ""
+            root.hintThree = ""
+            root.hintOne = root.hintPart(0)
+            root.hintTwo = root.hintPart(1)
+            root.hintThree = root.hintPart(2)
+            root.syncHostHintFieldCount()
         }
     }
 
@@ -172,7 +188,7 @@ Rectangle {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.margins: Theme.margin
-        anchors.topMargin: Theme.spacing * 0.5
+        anchors.topMargin: Theme.spacing * 0.25
         clip: true
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
         ScrollBar.vertical: ThemedScrollBar {
@@ -195,7 +211,7 @@ Rectangle {
         Column {
             id: configColumn
             width: parent.width
-            spacing: Theme.spacing * 1.35
+            spacing: Theme.spacing
 
             NeonPanel {
                 id: contentPanel
@@ -283,7 +299,7 @@ Rectangle {
                         id: standardFormPage
                         Column {
                             width: contentCol.width
-                            spacing: Theme.spacing
+                            spacing: Theme.spacing * 0.65
 
                             Text {
                                 width: parent.width
@@ -338,7 +354,7 @@ Rectangle {
                                 width: parent.width
                                 fillWidth: true
                                 visible: root.textOnlyRound
-                                reloadKey: adminViewModel.selectedPuzzleId
+                                reloadKey: root.editorFieldReloadKey
                                 readValue: function() { return adminViewModel.hostHintAt(0) }
                                 placeholderText: adminViewModel.label("ui.editor.question_placeholder")
                                 onTextEdited: function(t) { adminViewModel.setHostHintAt(0, t) }
@@ -361,7 +377,7 @@ Rectangle {
                                 width: parent.width
                                 fillWidth: true
                                 visible: root.textOnlyRound
-                                reloadKey: adminViewModel.selectedPuzzleId
+                                reloadKey: root.editorFieldReloadKey
                                 readValue: function() { return adminViewModel.editAnswer }
                                 placeholderText: adminViewModel.label("ui.editor.answer")
                                 onTextEdited: function(t) { adminViewModel.editAnswer = t }
@@ -379,7 +395,7 @@ Rectangle {
                                 width: parent.width
                                 fillWidth: true
                                 visible: root.textOnlyRound
-                                reloadKey: adminViewModel.selectedPuzzleId
+                                reloadKey: root.editorFieldReloadKey
                                 readValue: function() { return adminViewModel.hostHintAt(1) }
                                 placeholderText: adminViewModel.label("ui.editor.hint_2_placeholder")
                                 onTextEdited: function(t) { adminViewModel.setHostHintAt(1, t) }
@@ -400,7 +416,7 @@ Rectangle {
                                 EditorBoundField {
                                     width: contentCol.width
                                     fillWidth: true
-                                    reloadKey: adminViewModel.selectedPuzzleId
+                                    reloadKey: root.editorFieldReloadKey
                                     readValue: function() { return adminViewModel.cardTextAt(index) }
                                     placeholderText: adminViewModel.cardTextPlaceholder(index)
                                     onTextEdited: function(t) { adminViewModel.setCardTextAt(index, t) }
@@ -460,6 +476,44 @@ Rectangle {
                                 wrapMode: Text.WordWrap
                             }
 
+                            Column {
+                                width: parent.width
+                                spacing: Theme.spacing * 0.35
+
+                                Text {
+                                    width: parent.width
+                                    text: adminViewModel.label("ui.editor.mask_precision_title")
+                                    color: Theme.textSecondary
+                                    font.pixelSize: Theme.fontSizeCaption
+                                    font.bold: true
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: adminViewModel.label("ui.editor.mask_precision_hint")
+                                    color: Theme.textSecondary
+                                    font.pixelSize: Theme.fontSizeCaption
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                MaskPrecisionSlider {
+                                    width: parent.width
+                                    from: 1
+                                    to: 10
+                                    value: adminViewModel.maskPrecision
+                                    onValueChanged: adminViewModel.maskPrecision = value
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: adminViewModel.maskPrecisionLabel
+                                    color: Theme.primary
+                                    font.pixelSize: Theme.fontSizeCaption
+                                    font.bold: true
+                                    horizontalAlignment: Text.AlignHCenter
+                                }
+                            }
+
                             Repeater {
                                 model: adminViewModel.maskEntryCount
 
@@ -497,7 +551,7 @@ Rectangle {
                                             anchors.rightMargin: Theme.spacing
                                             anchors.verticalCenter: removeMaskButton.verticalCenter
                                             fillWidth: true
-                                            reloadKey: adminViewModel.selectedPuzzleId
+                                            reloadKey: root.editorFieldReloadKey * 1000 + index
                                             readValue: function() { return adminViewModel.maskAnswerAt(index) }
                                             placeholderText: adminViewModel.label("ui.editor.mask_answer_placeholder")
                                             onTextEdited: function(t) { adminViewModel.setMaskAnswerAt(index, t) }
@@ -536,19 +590,21 @@ Rectangle {
 
                             Rectangle {
                                 width: parent.width
-                                height: parent.width * Theme.cardAspect
+                                height: Math.min(parent.width * 0.72, Theme.h * 0.38)
                                 radius: Theme.radius
                                 color: Theme.surfaceAlt
                                 visible: adminViewModel.hasPreviewImage
+                                clip: true
 
                                 Image {
                                     id: puzzlePreview
                                     anchors.fill: parent
-                                    anchors.margins: Theme.spacing
+                                    anchors.margins: Theme.spacing * 0.45
                                     source: adminViewModel.previewImageUrl
                                     fillMode: Image.PreserveAspectFit
                                     cache: false
                                     opacity: adminViewModel.maskProcessing ? 0.88 : 1
+                                    clip: true
 
                                     MaskRegionSelector {
                                         id: maskSelector
@@ -681,7 +737,7 @@ Rectangle {
                         width: parent.width
                         fillWidth: true
                         visible: !root.useAnswerOptionsMode
-                        reloadKey: adminViewModel.selectedPuzzleId
+                        reloadKey: root.editorFieldReloadKey
                         readValue: function() { return adminViewModel.editAnswer }
                         placeholderText: adminViewModel.label("ui.editor.answer")
                         onTextEdited: function(t) { adminViewModel.editAnswer = t }
@@ -728,9 +784,8 @@ Rectangle {
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 0
                                 readOnly: adminViewModel.isPhotoMaskRound && adminViewModel.masksAutoGroupAnswers
-                                reloadKey: adminViewModel.isPhotoMaskRound && adminViewModel.masksAutoGroupAnswers
-                                           ? adminViewModel.selectedPuzzleId * 1000 + adminViewModel.maskEntryCount
-                                           : adminViewModel.selectedPuzzleId
+                                reloadKey: adminViewModel.editorLoadRevision * 1000000
+                                           + adminViewModel.answerOptionsRevision
                                 readValue: function() { return adminViewModel.answerOptionAt(index) }
                                 placeholderText: adminViewModel.answerOptionPlaceholder()
                                 onTextEdited: function(t) {
@@ -811,7 +866,7 @@ Rectangle {
                     EditorBoundField {
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
-                        reloadKey: adminViewModel.selectedPuzzleId
+                        reloadKey: root.editorFieldReloadKey
                         readValue: function() { return adminViewModel.hostHintAt(index) }
                         placeholderText: adminViewModel.label("ui.editor.host_hint_format").arg(index + 1)
                         onTextEdited: function(t) { adminViewModel.setHostHintAt(index, t) }

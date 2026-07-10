@@ -66,19 +66,6 @@ Item {
 
                     Text {
                         Layout.fillWidth: true
-                        text: gameViewModel.activeTeam === "Team_A"
-                              ? (gameViewModel.teamAName + " — ход")
-                              : (gameViewModel.teamBName + " — ход")
-                        color: Theme.success
-                        font.pixelSize: Theme.fontSizeCaption
-                        font.bold: true
-                        visible: gameViewModel.currentStage === "STAGE_CLOSED_CARDS"
-                                 || gameViewModel.currentStage === "STAGE_MAIN_TURN"
-                                 || gameViewModel.currentStage === "STAGE_STEAL_TURN"
-                    }
-
-                    Text {
-                        Layout.fillWidth: true
                         visible: gameViewModel.gracePeriodActive
                         text: gameViewModel.label("ui.game.grace_hint")
                         color: Theme.gold

@@ -5,6 +5,8 @@
 
 #include <QDir>
 #include <QJsonDocument>
+#include <QRegularExpression>
+#include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStandardPaths>
@@ -129,6 +131,9 @@ bool DatabaseManager::initialize()
         return false;
     }
     if (!normalizePuzzleHintKeys()) {
+        return false;
+    }
+    if (!scrubImportedDemoPuzzleHints()) {
         return false;
     }
     if (!repairDuplicatePuzzles()) {
@@ -555,13 +560,24 @@ bool DatabaseManager::normalizePuzzleHintKeys()
     for (const PuzzleHintRow &row : rows) {
         const QString targetKey = QStringLiteral("puzzle.hint.p%1").arg(row.puzzleId);
 
-        QString ru = readLocalized(row.currentKey, QStringLiteral("ru"));
-        QString en = readLocalized(row.currentKey, QStringLiteral("en"));
-        if (ru.isEmpty()) {
+        QString ru;
+        QString en;
+        static const QRegularExpression ownedHintKey(QStringLiteral("^puzzle\\.hint\\.p\\d+$"));
+        const bool sharedLegacyKey = !row.currentKey.trimmed().isEmpty()
+            && !ownedHintKey.match(row.currentKey).hasMatch();
+
+        if (sharedLegacyKey) {
             ru = readLocalized(targetKey, QStringLiteral("ru"));
-        }
-        if (en.isEmpty()) {
             en = readLocalized(targetKey, QStringLiteral("en"));
+        } else {
+            ru = readLocalized(row.currentKey, QStringLiteral("ru"));
+            en = readLocalized(row.currentKey, QStringLiteral("en"));
+            if (ru.isEmpty()) {
+                ru = readLocalized(targetKey, QStringLiteral("ru"));
+            }
+            if (en.isEmpty()) {
+                en = readLocalized(targetKey, QStringLiteral("en"));
+            }
         }
 
         QSqlQuery updatePuzzleQuery(db);
@@ -578,6 +594,124 @@ bool DatabaseManager::normalizePuzzleHintKeys()
             || !upsertLocalized(targetKey, QStringLiteral("en"), en)) {
             db.rollback();
             return false;
+        }
+    }
+
+    if (!db.commit()) {
+        emit databaseError(db.lastError().text());
+        return false;
+    }
+    return true;
+}
+
+bool DatabaseManager::scrubImportedDemoPuzzleHints()
+{
+    QMutexLocker locker(&m_mutex);
+    QSqlDatabase db = database();
+
+    const UiStringDefaults &defaults = UiStringDefaults::instance();
+    QSet<QString> demoHints;
+    for (const QString &key : defaults.keys()) {
+        if (!key.startsWith(QStringLiteral("puzzle.hint."))) {
+            continue;
+        }
+        static const QRegularExpression ownedHintKey(QStringLiteral("^puzzle\\.hint\\.p\\d+$"));
+        if (ownedHintKey.match(key).hasMatch()) {
+            continue;
+        }
+        const QString text = defaults.text(key).trimmed();
+        if (!text.isEmpty()) {
+            demoHints.insert(text);
+        }
+    }
+    demoHints.insert(QStringLiteral("Подсказка"));
+
+    if (!db.transaction()) {
+        emit databaseError(db.lastError().text());
+        return false;
+    }
+
+    QSqlQuery listQuery(db);
+    if (!listQuery.exec(QStringLiteral(
+            "SELECT p.id, p.correct_answer, ls.translated_text "
+            "FROM puzzles p "
+            "LEFT JOIN localization_strings ls "
+            "ON ls.string_key = ('puzzle.hint.p' || p.id) AND ls.lang_code = 'ru' "
+            "ORDER BY p.id"))) {
+        emit databaseError(listQuery.lastError().text());
+        db.rollback();
+        return false;
+    }
+
+    auto clearOwnedHint = [this, &db](int puzzleId) -> bool {
+        const QString hintKey = QStringLiteral("puzzle.hint.p%1").arg(puzzleId);
+        QSqlQuery clearRu(db);
+        clearRu.prepare(QStringLiteral(
+            "UPDATE localization_strings SET translated_text = '' "
+            "WHERE string_key = ? AND lang_code = 'ru'"));
+        clearRu.addBindValue(hintKey);
+        if (!clearRu.exec()) {
+            emit databaseError(clearRu.lastError().text());
+            return false;
+        }
+
+        QSqlQuery clearEn(db);
+        clearEn.prepare(QStringLiteral(
+            "UPDATE localization_strings SET translated_text = '' "
+            "WHERE string_key = ? AND lang_code = 'en'"));
+        clearEn.addBindValue(hintKey);
+        if (!clearEn.exec()) {
+            emit databaseError(clearEn.lastError().text());
+            return false;
+        }
+        return true;
+    };
+
+    auto hasUserContent = [&db](int puzzleId) -> bool {
+        QSqlQuery imageQuery(db);
+        imageQuery.prepare(QStringLiteral(
+            "SELECT COUNT(*) FROM puzzle_images WHERE puzzle_id = ? AND length(image_data) > 0"));
+        imageQuery.addBindValue(puzzleId);
+        if (imageQuery.exec() && imageQuery.next() && imageQuery.value(0).toInt() > 0) {
+            return true;
+        }
+
+        QSqlQuery maskQuery(db);
+        maskQuery.prepare(QStringLiteral(
+            "SELECT COUNT(*) FROM puzzle_masks WHERE puzzle_id = ?"));
+        maskQuery.addBindValue(puzzleId);
+        if (maskQuery.exec() && maskQuery.next() && maskQuery.value(0).toInt() > 0) {
+            return true;
+        }
+        return false;
+    };
+
+    while (listQuery.next()) {
+        const int puzzleId = listQuery.value(0).toInt();
+        const QString answer = repairUtf8Mojibake(listQuery.value(1).toString().trimmed());
+        const QString hint = repairUtf8Mojibake(listQuery.value(2).toString().trimmed());
+        if (hint.isEmpty() || !demoHints.contains(hint)) {
+            continue;
+        }
+        if (hasUserContent(puzzleId)) {
+            continue;
+        }
+        if (!clearOwnedHint(puzzleId)) {
+            db.rollback();
+            return false;
+        }
+        if (answer == QStringLiteral("Свадебный букет")
+            || answer == QStringLiteral("Париж")
+            || answer == QStringLiteral("Фен")
+            || answer == QStringLiteral("Ответ")) {
+            QSqlQuery clearAnswer(db);
+            clearAnswer.prepare(QStringLiteral("UPDATE puzzles SET correct_answer = '' WHERE id = ?"));
+            clearAnswer.addBindValue(puzzleId);
+            if (!clearAnswer.exec()) {
+                emit databaseError(clearAnswer.lastError().text());
+                db.rollback();
+                return false;
+            }
         }
     }
 
@@ -1617,6 +1751,26 @@ PuzzleInfo DatabaseManager::puzzleById(int puzzleId) const
     return info;
 }
 
+QString DatabaseManager::storedLocalizedString(const QString &key, const QString &langCode) const
+{
+    if (key.isEmpty()) {
+        return {};
+    }
+
+    QMutexLocker locker(&m_mutex);
+
+    QSqlQuery query(database());
+    query.prepare(QStringLiteral(
+        "SELECT translated_text FROM localization_strings WHERE string_key = ? AND lang_code = ?"));
+    query.addBindValue(key);
+    query.addBindValue(langCode);
+    if (query.exec() && query.next()) {
+        return repairUtf8Mojibake(query.value(0).toString().trimmed());
+    }
+
+    return {};
+}
+
 QString DatabaseManager::localizedString(const QString &key, const QString &langCode) const
 {
     if (key.isEmpty()) {
@@ -1637,6 +1791,11 @@ QString DatabaseManager::localizedString(const QString &key, const QString &lang
 
     if (!result.isEmpty()) {
         return repairUtf8Mojibake(result);
+    }
+
+    static const QRegularExpression ownedPuzzleHint(QStringLiteral("^puzzle\\.hint\\.p\\d+$"));
+    if (ownedPuzzleHint.match(key).hasMatch()) {
+        return {};
     }
 
     if (langCode == QStringLiteral("ru")) {

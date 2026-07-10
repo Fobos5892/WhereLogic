@@ -10,13 +10,13 @@ SettingsTextField {
     function reloadFromModel() {
         if (typeof readValue !== "function")
             return
-        control.text = readValue() || ""
+        const nextValue = readValue() || ""
+        if (field.text === nextValue && control.text === nextValue)
+            return
+        control.text = nextValue
     }
 
     Component.onCompleted: reloadFromModel()
 
-    onReloadKeyChanged: {
-        if (readOnly || !control.inputActiveFocus)
-            reloadFromModel()
-    }
+    onReloadKeyChanged: reloadFromModel()
 }
