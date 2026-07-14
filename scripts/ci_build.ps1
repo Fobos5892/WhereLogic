@@ -17,27 +17,52 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildPath = Join-Path $repoRoot $BuildDir
 
-function Resolve-Make {
-    $make = Get-Command mingw32-make -ErrorAction SilentlyContinue
-    if ($make) { return $make.Source }
+function Resolve-MingwBin {
+    $fromPath = Get-Command g++ -ErrorAction SilentlyContinue
+    if ($fromPath) {
+        $bin = Split-Path $fromPath.Source
+        if (Test-Path (Join-Path $bin "mingw32-make.exe")) { return $bin }
+    }
 
-    $candidates = @(
-        "C:\Qt\Tools\mingw1310_64\bin\mingw32-make.exe",
-        "C:\Qt\Tools\mingw1120_64\bin\mingw32-make.exe"
+    $candidates = @()
+    if ($env:IQTA_TOOLS) {
+        $candidates += (Join-Path $env:IQTA_TOOLS "mingw1310_64\bin")
+        $candidates += (Join-Path $env:IQTA_TOOLS "mingw1120_64\bin")
+    }
+    $candidates += @(
+        "C:\Qt\Tools\mingw1310_64\bin",
+        "C:\Qt\Tools\mingw1120_64\bin"
     )
     foreach ($candidate in $candidates) {
-        if (Test-Path $candidate) { return $candidate }
+        if (Test-Path (Join-Path $candidate "mingw32-make.exe")) { return $candidate }
     }
-    throw "mingw32-make not found in PATH or C:\Qt\Tools"
+    return $null
+}
+
+function Resolve-Make {
+    $mingwBin = Resolve-MingwBin
+    if ($mingwBin) {
+        $make = Join-Path $mingwBin "mingw32-make.exe"
+        if (Test-Path $make) { return $make }
+    }
+
+    $makeCmd = Get-Command mingw32-make -ErrorAction SilentlyContinue
+    if ($makeCmd) { return $makeCmd.Source }
+
+    throw "mingw32-make not found in PATH or Qt Tools (need mingw1310_64 for Qt 6.11)."
 }
 
 function Resolve-QMake {
     $qmake = Get-Command qmake -ErrorAction SilentlyContinue
     if ($qmake) { return $qmake.Source }
 
-    $pattern = Join-Path $env:QT_ROOT_DIR "mingw*\bin\qmake.exe"
-    $fromEnv = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($fromEnv) { return $fromEnv.FullName }
+    if ($env:QT_ROOT_DIR) {
+        $pattern = Join-Path $env:QT_ROOT_DIR "bin\qmake.exe"
+        if (Test-Path $pattern) { return $pattern }
+        $fromEnv = Get-ChildItem -Path (Join-Path $env:QT_ROOT_DIR "mingw*\bin\qmake.exe") -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($fromEnv) { return $fromEnv.FullName }
+    }
 
     $glob = Get-ChildItem -Path "C:\Qt" -Filter "qmake.exe" -Recurse -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -match "\\mingw.*\\bin\\qmake\.exe$" } |
@@ -46,6 +71,18 @@ function Resolve-QMake {
     if ($glob) { return $glob.FullName }
 
     throw "qmake not found. Install Qt MinGW or set PATH after install-qt-action."
+}
+
+function Ensure-MingwOnPath {
+    $mingwBin = Resolve-MingwBin
+    if (-not $mingwBin) { return }
+    if ($env:Path -notlike "*$mingwBin*") {
+        $env:Path = "$mingwBin;$env:Path"
+    }
+    $gpp = Join-Path $mingwBin "g++.exe"
+    if (Test-Path $gpp) {
+        Write-Host "g++:        $(& $gpp -dumpversion) ($gpp)"
+    }
 }
 
 if (Test-Path $buildPath) {
@@ -59,10 +96,15 @@ if (-not (Test-Path $buildPath)) {
     New-Item -ItemType Directory -Force -Path $buildPath | Out-Null
 }
 
+Ensure-MingwOnPath
 $qmakeExe = Resolve-QMake
 $makeExe = Resolve-Make
 $jobs = [int]$env:NUMBER_OF_PROCESSORS
 if ($jobs -lt 1) { $jobs = 4 }
+
+if ($BuildDir.StartsWith("-")) {
+    throw "Invalid -BuildDir '$BuildDir'. Pass named args, e.g. -BuildDir build-ci -Configuration release"
+}
 
 $qmakeArgs = @(
     (Join-Path $repoRoot "WhereLogic.pro"),

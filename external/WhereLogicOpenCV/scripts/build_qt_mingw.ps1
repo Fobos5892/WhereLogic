@@ -5,7 +5,7 @@
 
 param(
     [string]$ExternalRoot = "",
-    [string]$QtTools = "C:\Qt\Tools",
+    [string]$QtTools = "",
     [string]$OpenCvVersion = "4.13.0",
     [string]$BuildType = "Release",
     [switch]$Rebuild
@@ -15,6 +15,16 @@ $ErrorActionPreference = "Stop"
 
 if (-not $ExternalRoot) {
     $ExternalRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+}
+
+if (-not $QtTools) {
+    if ($env:IQTA_TOOLS -and (Test-Path $env:IQTA_TOOLS)) {
+        $QtTools = $env:IQTA_TOOLS
+    } elseif (Test-Path "C:\Qt\Tools") {
+        $QtTools = "C:\Qt\Tools"
+    } else {
+        $QtTools = "C:\Qt\Tools"
+    }
 }
 
 $installDir = Join-Path $ExternalRoot "prebuilt"

@@ -59,11 +59,42 @@ jobs:
           target: desktop
           arch: win64_mingw
           modules: qthttpserver qtmultimedia
-          tools: tools_mingw tools_cmake tools_ninja
+          # Qt 6.11 is built with MinGW 13.1 - an older tools_mingw triggers
+          # Qt header static_assert failures around noexcept lambdas.
+          tools: tools_mingw1310 tools_cmake tools_ninja
           cache: true
           add-tools-to-path: true
           # aqt 3.3.0 cannot install Qt 6.11+ on Windows (repo layout change)
           aqtsource: git+https://github.com/miurahr/aqtinstall.git@refs/pull/1000/head
+
+      - name: Use MinGW 13.1 toolchain
+        shell: pwsh
+        run: |
+          $candidates = @()
+          if ($env:IQTA_TOOLS) {
+            $candidates += (Join-Path $env:IQTA_TOOLS "mingw1310_64\bin")
+          }
+          if ($env:QT_ROOT_DIR) {
+            $qtRootParent = Split-Path (Split-Path $env:QT_ROOT_DIR -Parent) -Parent
+            $candidates += (Join-Path $qtRootParent "Tools\mingw1310_64\bin")
+          }
+          $candidates += @(
+            "D:\a\WhereLogic\Qt\Tools\mingw1310_64\bin",
+            "C:\Qt\Tools\mingw1310_64\bin"
+          )
+          $mingwBin = $candidates | Where-Object { Test-Path (Join-Path $_ "g++.exe") } | Select-Object -First 1
+          if (-not $mingwBin) {
+            Write-Host "Searched:"
+            $candidates | ForEach-Object { Write-Host "  $_" }
+            Get-ChildItem -Path ($env:IQTA_TOOLS, "D:\a\WhereLogic\Qt\Tools", "C:\Qt\Tools" | Where-Object { $_ -and (Test-Path $_) }) -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host "Found tools entry: $($_.FullName)" }
+            throw "mingw1310_64 not found. Qt 6.11 requires MinGW 13.1."
+          }
+          $env:Path = "$mingwBin;$env:Path"
+          "PATH=$env:Path" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "MinGW: $mingwBin"
+          & (Join-Path $mingwBin "g++.exe") --version
+          Write-Host "qmake: $(Get-Command qmake | Select-Object -ExpandProperty Source)"
 
       - name: Cache OpenCV prebuilt
         if: steps.mode.outputs.release == 'true'
@@ -79,15 +110,13 @@ jobs:
       - name: Build and test
         shell: pwsh
         run: |
-          $args = @(
-            "-Configuration", "release",
-            "-BuildDir", "${{ env.BUILD_DIR }}",
-            "-RunTests"
-          )
-          if ("${{ steps.mode.outputs.release }}" -ne "true") {
-            $args += "-NoOpenCV"
+          # Do not use $args (automatic variable) - it breaks named binding and
+          # can bind "-Configuration" into -BuildDir positionally.
+          if ("${{ steps.mode.outputs.release }}" -eq "true") {
+            & ./scripts/ci_build.ps1 -Configuration release -BuildDir "${{ env.BUILD_DIR }}" -RunTests
+          } else {
+            & ./scripts/ci_build.ps1 -Configuration release -BuildDir "${{ env.BUILD_DIR }}" -NoOpenCV -RunTests
           }
-          & ./scripts/ci_build.ps1 @args
 
       - name: Package release archive
         if: steps.mode.outputs.release == 'true'

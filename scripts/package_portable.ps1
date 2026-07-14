@@ -36,12 +36,62 @@ function Find-GameExe {
     return $null
 }
 
-function Find-WinDeployQt {
+function Find-QtBinDir {
     $qmake = Get-Command qmake -ErrorAction SilentlyContinue
-    if (-not $qmake) { return $null }
-    $qtBin = Split-Path $qmake.Source
+    if ($qmake) { return (Split-Path $qmake.Source) }
+
+    if ($env:QT_ROOT_DIR) {
+        $bin = Join-Path $env:QT_ROOT_DIR "bin"
+        if (Test-Path (Join-Path $bin "windeployqt.exe")) { return $bin }
+    }
+
+    $roots = @()
+    if ($env:IQTA_TOOLS) {
+        $roots += (Split-Path $env:IQTA_TOOLS -Parent)
+    }
+    $roots += @("C:\Qt", "D:\Qt")
+
+    foreach ($root in $roots) {
+        if (-not (Test-Path $root)) { continue }
+        $hit = Get-ChildItem -Path $root -Filter "windeployqt.exe" -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\6\.[0-9].*\\mingw[^\\]*\\bin\\windeployqt\.exe$" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+        if ($hit) { return $hit.DirectoryName }
+    }
+    return $null
+}
+
+function Find-WinDeployQt {
+    $qtBin = Find-QtBinDir
+    if (-not $qtBin) { return $null }
     $candidate = Join-Path $qtBin "windeployqt.exe"
     if (Test-Path $candidate) { return $candidate }
+    return $null
+}
+
+function Find-MingwRuntimeDir {
+    $candidates = @()
+    if ($env:IQTA_TOOLS) {
+        $candidates += (Join-Path $env:IQTA_TOOLS "mingw1310_64\bin")
+        $candidates += (Join-Path $env:IQTA_TOOLS "mingw1120_64\bin")
+    }
+    $qtBin = Find-QtBinDir
+    if ($qtBin) {
+        # Qt\6.11.1\mingw_64\bin -> Qt\Tools\mingw1310_64\bin
+        $qtRoot = Split-Path (Split-Path (Split-Path $qtBin -Parent) -Parent) -Parent
+        $candidates += (Join-Path $qtRoot "Tools\mingw1310_64\bin")
+        $candidates += (Join-Path $qtRoot "Tools\mingw1120_64\bin")
+        $candidates += (Resolve-Path (Join-Path $qtBin "..\..\..\Tools\mingw*\bin") -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Path)
+    }
+    $candidates += @(
+        "C:\Qt\Tools\mingw1310_64\bin",
+        "C:\Qt\Tools\mingw1120_64\bin"
+    )
+    foreach ($dir in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+        if (Test-Path (Join-Path $dir "libstdc++-6.dll")) { return $dir }
+    }
     return $null
 }
 
@@ -64,12 +114,32 @@ Copy-Item $exe $OutDir
 
 # Qt + QML plugins
 $windeploy = Find-WinDeployQt
-if ($windeploy) {
-    $qmlDir = Join-Path $Root "game\qml"
-    Write-Host "Running windeployqt..."
-    & $windeploy --release --qmldir $qmlDir (Join-Path $OutDir "WhereLogicGame.exe")
-} else {
-    Write-Warning "windeployqt not in PATH - copy Qt DLLs manually or add Qt bin to PATH."
+if (-not $windeploy) {
+    throw @"
+windeployqt.exe not found.
+Add Qt MinGW bin to PATH (so qmake/windeployqt work), or set QT_ROOT_DIR.
+Example:
+  `$env:Path = 'C:\Qt\6.11.1\mingw_64\bin;' + `$env:Path
+  powershell -ExecutionPolicy Bypass -File scripts\package_portable.ps1
+"@
+}
+
+$qmlDir = Join-Path $Root "game\qml"
+Write-Host "windeployqt: $windeploy"
+$deployArgs = @(
+    "--release",
+    "--compiler-runtime",
+    "--qmldir", $qmlDir,
+    (Join-Path $OutDir "WhereLogicGame.exe")
+)
+& $windeploy @deployArgs
+if ($LASTEXITCODE -ne 0) {
+    throw "windeployqt failed with exit code $LASTEXITCODE"
+}
+
+$requiredQtDll = Join-Path $OutDir "Qt6Core.dll"
+if (-not (Test-Path $requiredQtDll)) {
+    throw "Qt6Core.dll missing in $OutDir after windeployqt - portable package is incomplete."
 }
 
 # OpenCV runtime (if built with HAS_OPENCV)
@@ -84,32 +154,27 @@ if (Test-Path $opencvBin) {
 
 # MinGW runtime (needed for MinGW-built exe on PC without compiler)
 $mingwDlls = @("libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")
+$mingwDir = Find-MingwRuntimeDir
 foreach ($name in $mingwDlls) {
+    $dest = Join-Path $OutDir $name
+    if (Test-Path $dest) { continue }
+
     $fromExe = Join-Path $exeDir $name
     if (Test-Path $fromExe) {
         Copy-Item $fromExe $OutDir -Force
         continue
     }
-    $qmake = Get-Command qmake -ErrorAction SilentlyContinue
-    if ($qmake) {
-        $qtBin = Split-Path $qmake.Source
-        $toolchain = Resolve-Path (Join-Path $qtBin "..\..\Tools\mingw*\bin") -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($toolchain) {
-            $fromTool = Join-Path $toolchain $name
-            if (Test-Path $fromTool) { Copy-Item $fromTool $OutDir -Force }
+    if ($mingwDir) {
+        $fromTool = Join-Path $mingwDir $name
+        if (Test-Path $fromTool) {
+            Copy-Item $fromTool $OutDir -Force
         }
     }
 }
 
-# Optional MSYS2 OpenCV dependencies - not needed for Qt-built WhereLogicOpenCV
-$msysBin = "C:\msys64\mingw64\bin"
-if (Test-Path $msysBin) {
-    $extra = @("libjpeg-*.dll", "libpng*.dll", "libtiff-*.dll", "libwebp-*.dll", "zlib1.dll", "libopenjp2-*.dll")
-    foreach ($pat in $extra) {
-        Get-ChildItem (Join-Path $msysBin $pat) -ErrorAction SilentlyContinue | ForEach-Object {
-            Copy-Item $_.FullName $OutDir -Force
-        }
-    }
+$missingMingw = @($mingwDlls | Where-Object { -not (Test-Path (Join-Path $OutDir $_)) })
+if ($missingMingw.Count -gt 0) {
+    Write-Warning "Missing MinGW runtime DLL(s): $($missingMingw -join ', '). Game may fail on PCs without MinGW."
 }
 
 # Data / config next to exe (optional)
@@ -118,8 +183,9 @@ if (Test-Path $configSrc) {
     Copy-Item $configSrc (Join-Path $OutDir "config") -Recurse -Force
 }
 
+$dllCount = @(Get-ChildItem $OutDir -Filter "*.dll" -File -ErrorAction SilentlyContinue).Count
 Write-Host ""
-Write-Host "Done. Portable folder:"
+Write-Host "Done. Portable folder ($dllCount DLLs):"
 Write-Host "  $OutDir"
 Write-Host ""
 Write-Host "Copy the ENTIRE folder to another PC and run WhereLogicGame.exe."
