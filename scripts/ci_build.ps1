@@ -101,10 +101,31 @@ $qmakeExe = Resolve-QMake
 $makeExe = Resolve-Make
 $jobs = [int]$env:NUMBER_OF_PROCESSORS
 if ($jobs -lt 1) { $jobs = 4 }
+# GitHub-hosted Windows runners OOMs when compiling game+tests at full -j.
+if ($env:GITHUB_ACTIONS -eq "true" -and $jobs -gt 2) {
+    $jobs = 2
+}
 
 if ($BuildDir.StartsWith("-")) {
     throw "Invalid -BuildDir '$BuildDir'. Pass named args, e.g. -BuildDir build-ci -Configuration release"
 }
+
+$qtBin = Split-Path $qmakeExe -Parent
+$qtRoot = Split-Path $qtBin -Parent
+$requiredLibs = @(
+    "libQt6HttpServer.a",
+    "libQt6WebSockets.a",
+    "libQt6Multimedia.a",
+    "libQt6Quick.a",
+    "libQt6Sql.a"
+)
+foreach ($libName in $requiredLibs) {
+    $libPath = Join-Path $qtRoot "lib\$libName"
+    if (-not (Test-Path $libPath)) {
+        throw "Missing Qt library: $libPath (check install-qt-action modules)"
+    }
+}
+Write-Host "Qt modules: HttpServer/WebSockets/Multimedia OK ($qtRoot)"
 
 $qmakeArgs = @(
     (Join-Path $repoRoot "WhereLogic.pro"),
@@ -127,7 +148,36 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     & $makeExe "-j$jobs"
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "=== Parallel build failed (exit $LASTEXITCODE). Retrying with -j1 for a clear error ==="
+        & $makeExe "-j1"
+        $serialExit = $LASTEXITCODE
+
+        Write-Host ""
+        Write-Host "=== Built executables under $buildPath ==="
+        Get-ChildItem -Path $buildPath -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "  $($_.FullName)" }
+
+        $expected = @(
+            "WhereLogicGame.exe",
+            "WhereLogicPresenter.exe",
+            "WhereLogicSetup.exe",
+            "tst_databasemanager.exe",
+            "tst_gameviewmodel.exe",
+            "tst_networkserver.exe",
+            "tst_restapiclient.exe",
+            "tst_round_reveal_policy.exe"
+        )
+        foreach ($name in $expected) {
+            $hit = Get-ChildItem -Path $buildPath -Filter $name -Recurse -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            if (-not $hit) {
+                Write-Host "MISSING: $name"
+            }
+        }
+        exit $serialExit
+    }
 } finally {
     Pop-Location
 }

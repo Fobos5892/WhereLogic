@@ -58,7 +58,8 @@ jobs:
           host: windows
           target: desktop
           arch: win64_mingw
-          modules: qthttpserver qtmultimedia
+          # HttpServer needs WebSockets; list both so aqt cache/deps never skip it.
+          modules: qthttpserver qtwebsockets qtmultimedia
           # Qt 6.11 is built with MinGW 13.1 - an older tools_mingw triggers
           # Qt header static_assert failures around noexcept lambdas.
           tools: tools_mingw1310 tools_cmake tools_ninja
